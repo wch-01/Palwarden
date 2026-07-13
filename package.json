@@ -1,0 +1,32 @@
+{
+  "name": "palwarden",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted Palworld Dedicated Server Controller",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @palwarden/api --filter @palwarden/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "e2e": "playwright test",
+    "format": "prettier --write .",
+    "db:migrate": "pnpm --filter @palwarden/api prisma:migrate",
+    "db:deploy": "pnpm --filter @palwarden/api prisma:deploy",
+    "db:generate": "pnpm --filter @palwarden/api prisma:generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.0"
+  }
+}

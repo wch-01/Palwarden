@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  VIEWER
+}
+
+enum AuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGOUT
+  USER_CREATED
+  SERVER_CREATED
+  SERVER_UPDATED
+  SERVER_DELETED
+  SERVER_STARTED
+  SERVER_STOPPED
+  WORLD_SAVE
+  CREDENTIAL_REPLACED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         UserRole
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  csrfToken String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  username  String
+  ipAddress String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([username, ipAddress, createdAt])
+}
+
+model ServerInstance {
+  id                         String   @id @default(cuid())
+  displayName                String
+  description                String?
+  enabled                    Boolean  @default(true)
+  installationDirectory      String   @unique
+  executablePath             String
+  workingDirectory           String
+  configurationFilePath      String
+  saveDirectory              String
+  backupDirectory            String
+  restApiHost                String   @default("127.0.0.1")
+  restApiPort                Int
+  encryptedAdminPassword     String?
+  encryptedAdminPasswordIv   String?
+  encryptedAdminPasswordTag  String?
+  gamePort                   Int
+  queryPort                  Int
+  launchArgumentsJson        String   @default("[]")
+  autoStart                  Boolean  @default(false)
+  autoRestart                Boolean  @default(false)
+  backupBeforeRestart        Boolean  @default(false)
+  shutdownWaitSeconds        Int      @default(30)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model BackupRecord {
+  id               String   @id @default(cuid())
+  serverInstanceId String
+  triggerType      String
+  filePath         String
+  sizeBytes        Int
+  success          Boolean
+  failureMessage   String?
+  createdAt        DateTime @default(now())
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  actorId   String?
+  action    AuditAction
+  targetId  String?
+  message   String
+  metadata  String?
+  createdAt DateTime    @default(now())
+
+  @@index([createdAt])
+}
