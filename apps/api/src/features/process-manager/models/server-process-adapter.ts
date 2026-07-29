@@ -10,6 +10,12 @@ export interface ServerProcessStatus {
   state: RuntimeState;
   pid?: number;
   uptimeSeconds: number;
+  hostCpuPercent?: number | null;
+  hostMemoryMb?: number | null;
+  processCpuAveragePercent?: number | null;
+  processCpuPeakPercent?: number | null;
+  processPrivateMemoryMb?: number | null;
+  processPeakMemoryMb?: number | null;
 }
 
 export interface ServerProcessAdapter {

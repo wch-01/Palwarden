@@ -33,6 +33,9 @@ export interface ServerInstanceView {
   autoStart: boolean;
   autoRestart: boolean;
   backupBeforeRestart: boolean;
+  backupBeforeUpdate: boolean;
+  backupBeforeConfigChange: boolean;
+  forceStopAfterGracefulTimeout: boolean;
   adminPasswordConfigured: boolean;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +49,172 @@ export interface ServerDashboardCard extends ServerInstanceView {
   serverFps: number | null;
   uptimeSeconds: number | null;
   installedVersion: string | null;
+  hostCpuPercent: number | null;
+  hostMemoryMb: number | null;
+  processCpuAveragePercent: number | null;
+  processCpuPeakPercent: number | null;
+  processPrivateMemoryMb: number | null;
+  processPeakMemoryMb: number | null;
+  installDirectorySizeMb: number | null;
+  saveDirectorySizeMb: number | null;
+  backupDirectorySizeMb: number | null;
+  driveFreeSpaceMb: number | null;
+}
+
+export interface ServerLogEntry {
+  index: number;
+  timestamp: string | null;
+  stream: 'stdout' | 'stderr' | 'system';
+  message: string;
+  raw: string;
+}
+
+export interface ServerLogResult {
+  entries: ServerLogEntry[];
+  total: number;
+  filtered: number;
+}
+
+export interface ServerImportPreview {
+  installationDirectory: string;
+  executablePath: string;
+  workingDirectory: string;
+  configurationFilePath: string;
+  saveDirectory: string;
+  backupDirectory: string;
+  detected: {
+    executable: boolean;
+    configuration: boolean;
+    saveDirectory: boolean;
+  };
+  settings: {
+    serverName: string | null;
+    restApiPort: number | null;
+    gamePort: number | null;
+    queryPort: number | null;
+    maxPlayers: number | null;
+    adminPasswordConfigured: boolean;
+  };
+  warnings: string[];
+}
+
+export type ServerModKind = 'pak' | 'logic' | 'ue4ss' | 'unknown';
+
+export interface ServerModInventoryItem {
+  id: string;
+  name: string;
+  kind: ServerModKind;
+  path: string;
+  relativePath: string;
+  files: string[];
+  sizeBytes: number;
+  updatedAt: string | null;
+  status: 'enabled' | 'disabled' | 'partial' | 'folder' | 'missing';
+  loadPriority: number;
+  folderName: string | null;
+  sourceModId: number | null;
+  version: string | null;
+  latestVersion: string | null;
+  latestFileId: number | null;
+  updateAvailable: boolean;
+  updateCheckedAt: string | null;
+  updateCheckError: string | null;
+  author: string | null;
+  description: string | null;
+  dependencies: ServerModDependency[];
+  notes: string[];
+}
+
+export interface ServerModDependency {
+  name: string;
+  nexusModId: number | null;
+  nexusUrl: string | null;
+  required: boolean | null;
+  notes: string | null;
+}
+
+export interface ServerModInventory {
+  serverInstanceId: string;
+  scannedAt: string;
+  roots: Array<{
+    label: string;
+    path: string;
+    exists: boolean;
+  }>;
+  items: ServerModInventoryItem[];
+  warnings: string[];
+}
+
+export interface NexusModSummary {
+  id: string;
+  modId: number;
+  name: string;
+  author: string;
+  summary: string;
+  categoryName: string;
+  downloads: number;
+  endorsements: number;
+  pictureUrl: string | null;
+  directDownloadEnabled: boolean;
+  nexusUrl: string;
+}
+
+export interface NexusModFile {
+  fileId: number;
+  name: string;
+  version: string;
+  category: string;
+  isMain: boolean;
+  sizeKb: number | null;
+  description: string;
+}
+
+export type NexusInstallTargetKind = 'pak' | 'logic' | 'ue4ss';
+
+export interface NexusInstallPreview {
+  nexusModId: number;
+  fileId: number;
+  fileName: string;
+  modName: string;
+  detectedTargetKind: NexusInstallTargetKind;
+  targetKind: NexusInstallTargetKind;
+  folderName: string;
+  relativePath: string;
+  archiveFileCount: number;
+  pakFileCount: number;
+  warnings: string[];
+}
+
+export interface ServerModRequest {
+  id: string;
+  serverInstanceId: string;
+  nexusModId: number;
+  name: string;
+  author: string;
+  summary: string;
+  pictureUrl: string | null;
+  nexusUrl: string;
+  requestedBy: string | null;
+  requestedByUsername: string | null;
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface Ue4ssStatus {
+  installed: boolean;
+  installedVersion: string | null;
+  installedAt: string | null;
+  latestVersion: string | null;
+  latestAssetName: string | null;
+}
+
+export interface NexusConnectionState {
+  connected: boolean;
+  username: string | null;
+  userId: number | null;
+  isPremium: boolean;
+  updatedAt: string | null;
 }
 
 export interface SafePalworldError {

@@ -20,12 +20,17 @@ export interface PalworldMetrics {
 
 export interface PalworldPlayer {
   name?: string;
+  accountName?: string;
+  playerId?: string;
   playeruid?: string;
   steamid?: string;
   userId?: string;
+  ip?: string;
+  ping?: number;
   level?: number;
   location_x?: number;
   location_y?: number;
+  building_count?: number;
 }
 
 export class PalworldApiError extends Error {
@@ -51,12 +56,25 @@ export class PalworldApiClient {
     return this.request<PalworldMetrics>('GET', '/metrics');
   }
 
-  players(): Promise<PalworldPlayer[]> {
-    return this.request<PalworldPlayer[]>('GET', '/players');
+  async players(): Promise<PalworldPlayer[]> {
+    const response = await this.request<PalworldPlayer[] | { players?: PalworldPlayer[] }>('GET', '/players');
+    return Array.isArray(response) ? response : (response.players ?? []);
   }
 
   announce(message: string): Promise<void> {
     return this.request<void>('POST', '/announce', { message });
+  }
+
+  kick(userid: string, message?: string): Promise<void> {
+    return this.request<void>('POST', '/kick', { userid, message });
+  }
+
+  ban(userid: string, message?: string): Promise<void> {
+    return this.request<void>('POST', '/ban', { userid, message });
+  }
+
+  unban(userid: string): Promise<void> {
+    return this.request<void>('POST', '/unban', { userid });
   }
 
   save(): Promise<void> {

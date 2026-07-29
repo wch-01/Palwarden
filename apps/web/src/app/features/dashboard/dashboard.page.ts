@@ -21,10 +21,14 @@ import { selectServerFromRoute } from '../server-instances/selected-server';
       <section class="stat-grid dashboard-stats">
         <div><span>REST API</span><strong>{{ item.restConnectivity }}</strong></div>
         <div><span>Players</span><strong>{{ item.currentPlayers ?? 0 }}/{{ item.maxPlayers ?? 0 }}</strong></div>
-        <div><span>Tick Rate</span><strong>{{ item.serverFps ?? 'n/a' }}</strong></div>
+        <div><span>Server FPS</span><strong>{{ item.serverFps ?? 'n/a' }}</strong></div>
         <div><span>Version</span><strong>{{ item.installedVersion ?? 'unknown' }}</strong></div>
-        <div><span>CPU Usage</span><strong>Not measured</strong></div>
-        <div><span>RAM Usage</span><strong>Not measured</strong></div>
+        <div><span>CPU Usage</span><strong>{{ formatPercent(item.hostCpuPercent) }}</strong></div>
+        <div><span>RAM Usage</span><strong>{{ formatMemory(item.hostMemoryMb) }}</strong></div>
+        <div><span>CPU Avg/Peak</span><strong>{{ formatPercent(item.processCpuAveragePercent) }} / {{ formatPercent(item.processCpuPeakPercent) }}</strong></div>
+        <div><span>Private RAM</span><strong>{{ formatMemory(item.processPrivateMemoryMb) }}</strong></div>
+        <div><span>Save Size</span><strong>{{ formatMemory(item.saveDirectorySizeMb) }}</strong></div>
+        <div><span>Drive Free</span><strong>{{ formatMemory(item.driveFreeSpaceMb) }}</strong></div>
         <div><span>Installed Mods</span><strong>0</strong></div>
         <div><span>Uptime</span><strong>{{ formatUptime(item.uptimeSeconds) }}</strong></div>
       </section>
@@ -108,5 +112,13 @@ export class DashboardPage {
     const hours = Math.floor(value / 3600);
     const minutes = Math.floor((value % 3600) / 60);
     return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+
+  formatPercent(value: number | null): string {
+    return value === null ? 'n/a' : `${value.toFixed(1)}%`;
+  }
+
+  formatMemory(value: number | null): string {
+    return value === null ? 'n/a' : `${value.toFixed(1)} MB`;
   }
 }

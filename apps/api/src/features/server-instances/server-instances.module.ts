@@ -9,10 +9,12 @@ import { ProcessManagerService } from '../process-manager/services/process-manag
 import { WindowsServerProcessAdapter } from '../process-manager/adapters/windows-server-process.adapter';
 import { SteamCmdService } from './services/steamcmd.service';
 import { PalworldSettingsFileService } from './services/palworld-settings-file.service';
+import { BackupsService } from '../backups/backups.service';
+import { AuditLogController } from '../audit-log/audit-log.controller';
 
 @Module({
   imports: [AuthModule],
-  controllers: [ServerInstancesController],
+  controllers: [ServerInstancesController, AuditLogController],
   providers: [
     ServerInstancesService,
     CryptoService,
@@ -22,6 +24,7 @@ import { PalworldSettingsFileService } from './services/palworld-settings-file.s
     WindowsServerProcessAdapter,
     SteamCmdService,
     PalworldSettingsFileService,
+    BackupsService,
   ],
 })
 export class ServerInstancesModule {}

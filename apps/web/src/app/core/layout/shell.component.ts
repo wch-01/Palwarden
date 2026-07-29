@@ -11,8 +11,10 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
   { pattern: /^\/dashboard/, title: 'Dashboard', description: 'Monitor selected server health, players, and operational signals.' },
   { pattern: /^\/server-control/, title: 'Server Control', description: 'Run live actions against the selected Palworld server.' },
   { pattern: /^\/server-configuration/, title: 'Server Configuration', description: 'Edit the selected server configuration without opening files by hand.' },
+  { pattern: /^\/players/, title: 'Players', description: 'Review online players and manage player moderation.' },
   { pattern: /^\/mods/, title: 'Mods', description: 'Review installed mods and prepare mod management workflows.' },
   { pattern: /^\/logs/, title: 'Logs', description: 'Review Palwarden and selected-server logs.' },
+  { pattern: /^\/audit-log/, title: 'Audit Log', description: 'Review administrative actions and security-relevant events.' },
   { pattern: /^\/host\/launcher-options/, title: 'Launcher Options', description: 'Configure Palworld launch flags and host runtime behavior.' },
   { pattern: /^\/servers\/new/, title: 'New server', description: 'Install and register a Palworld dedicated server profile.' },
   { pattern: /^\/servers\/[^/]+\/players/, title: 'Players', description: 'Review player activity and moderation tools for the selected server.' },
@@ -35,10 +37,12 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a routerLink="/server-control" routerLinkActive="active">Server Control</a>
         <a routerLink="/server-configuration" routerLinkActive="active">Server Configuration</a>
+        <a routerLink="/players" routerLinkActive="active">Players</a>
         <a routerLink="/mods" routerLinkActive="active">Mods</a>
         <a routerLink="/logs" routerLinkActive="active">Logs</a>
         <div class="nav-section">Host Controls</div>
         <a routerLink="/host/launcher-options" routerLinkActive="active">Launcher Options</a>
+        <a routerLink="/audit-log" routerLinkActive="active">Audit Log</a>
         <a routerLink="/settings" routerLinkActive="active">Settings</a>
       </nav>
       <main class="app-main">

@@ -1,6 +1,6 @@
 # Palwarden
 
-Palwarden is a self-hosted Palworld Dedicated Server Controller for Windows 11 hosts. This first milestone controls existing local Palworld dedicated server installations; SteamCMD installation, updates, scheduled backups, mods, and advanced player administration are intentionally later milestones.
+Palwarden is a self-hosted Palworld Dedicated Server Controller for Windows 11 hosts. It manages multiple Palworld Dedicated Server profiles from one local web interface, including SteamCMD deploy-new flow, encrypted per-server AdminPassword storage, dashboard monitoring, server controls, world settings editing, player operations, logs, and manual backups.
 
 ## Stack and Versions
 
@@ -74,27 +74,39 @@ pnpm --filter @palwarden/web dev
 pnpm exec playwright test
 ```
 
-## First Milestone Features
+## Current Features
 
 - First-run owner setup with localhost/token restriction.
 - Login, logout, and session restore.
 - `OWNER`, `ADMIN`, and `VIEWER` roles.
-- Server profile create, read, update, and delete.
+- Server profile create, read, update, delete, and SteamCMD deploy-new flow.
 - Duplicate path and port validation.
 - Encrypted Palworld AdminPassword storage.
 - Palworld REST connection test using `/info` and `/metrics`.
 - Dashboard cards with state, REST connectivity, players, FPS, uptime, and version when reachable.
 - Windows process adapter using `child_process.spawn`.
-- Graceful stop path requests save and shutdown through Palworld REST.
+- Server Control page for start, graceful stop, restart, save world, broadcast, shutdown countdown, update, validate, and manual backup.
+- Graceful stop requests save and shutdown through Palworld REST.
 - Live process status and log updates through SSE.
+- Host CPU and RAM metrics for tracked Palworld processes.
+- Palworld settings editor for `PalWorldSettings.ini`, including a popular-settings section and advanced fields discovered from the config file.
+- AdminPassword can be changed from Server Configuration; Palwarden writes it to config and stores its own encrypted copy.
+- Player roster with kick, ban, and unban actions through the Palworld REST API.
+- Manual backup records, backup creation, restore, delete, and failed-record cleanup.
+- Backup-before-restart, backup-before-update, and backup-before-configuration-change policies.
+- Host-level Nexus Mods API key storage, encrypted with `PALWARDEN_MASTER_KEY`.
+- Per-server local mod inventory with enable, disable, remove, and load-order actions for Pak, LogicMods, and UE4SS mod folders.
+- Audit log API and UI for administrative actions.
 
 ## Known Limitations
 
-- SteamCMD fresh installs are implemented for the initial deploy-new flow. SteamCMD updates are not implemented yet.
-- Backups have schema support but no UI/action implementation yet.
-- Player administration route is reserved for the next milestone.
+- SteamCMD fresh installs, updates, and validation are implemented.
+- Manual backups can be created, restored, and deleted from Server Control. Scheduled backups are not implemented yet.
 - Process recovery after Palwarden restarts is only structurally prepared; robust process identity recovery is next.
 - The Windows adapter does not force-kill during normal graceful stop.
+- Settings sections for Windows startup, global start policy, automation, and user administration are still incomplete.
+- Nexus mod browsing, direct download, update checks, and admin approval workflows are not implemented yet.
+- Guild roster is a placeholder until Palworld exposes enough supported API data for it.
 
 ## Reference and License
 
@@ -102,6 +114,25 @@ The behavior reference was `wch-01/PW-Server-Manager` at commit `47f45f6a26e7cba
 
 Official Palworld REST API documentation is the source of truth for server API behavior.
 
-## Recommended Next Milestone
+## Todo: Possible With Current APIs
 
-Implement player operations and manual backups: `/players`, announcement, kick, ban, unban, save-before-backup, backup records, and audit-log UI.
+- Scheduled backups under Settings > Automation.
+- Better process recovery after Palwarden restarts.
+- Windows startup registration and global start-servers-on-launch policy.
+- Settings page completion for user access, server instance management, file paths, and automation.
+- Backup UI polish, restore progress, and clearer recovery messaging.
+- Nexus mod browsing, direct install, update checks, and host approval workflow modeled after PW-Server-Manager.
+- Installer/package work for Windows.
+
+## Todo: Waiting On Palworld API Support
+
+These are intentionally separated because Palwarden should not invent unsupported behavior or scrape unstable game internals when an official API is needed.
+
+- Real guild roster and guild management.
+- Authoritative installed/loaded mod list from the running server.
+- Runtime mod enable/disable or mod load-order management.
+- Save-complete event or save job status beyond the current REST `/save` success response.
+- Hot-apply server settings without restart, unless Palworld exposes a supported reload/update endpoint.
+- Richer player details such as inventory, pals, base ownership, or complete position/state data.
+- Ban list readback and richer moderation history from the server.
+- World actor snapshot UI for servers that do not expose the documented snapshot endpoint.

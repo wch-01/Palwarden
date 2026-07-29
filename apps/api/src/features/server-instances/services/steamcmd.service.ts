@@ -1,14 +1,26 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const STEAMCMD_URL = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip';
 const PALWORLD_DEDICATED_SERVER_APP_ID = '2394010';
 
+export interface SteamAppUpdateAvailability {
+  installedBuildId: string | null;
+  latestBuildId: string | null;
+  updateAvailable: boolean;
+}
+
 @Injectable()
 export class SteamCmdService {
+  private latestPublicBuildCache: { buildId: string | null; expiresAt: number } | null = null;
+
   async installPalworldServer(installDirectory: string, onOutput: (line: string) => void): Promise<void> {
+    await this.updatePalworldServer(installDirectory, onOutput, true);
+  }
+
+  async updatePalworldServer(installDirectory: string, onOutput: (line: string) => void, validate = false): Promise<void> {
     const steamcmd = await this.ensureSteamCmd(onOutput);
     const resolvedInstallDirectory = this.resolvePath(installDirectory);
     await mkdir(resolvedInstallDirectory, { recursive: true });
@@ -27,12 +39,13 @@ export class SteamCmdService {
       'anonymous',
       '+app_update',
       PALWORLD_DEDICATED_SERVER_APP_ID,
-      'validate',
+      ...(validate ? ['validate'] : []),
       '+quit',
     ];
+    onOutput(validate ? 'Validating Palworld Dedicated Server files with SteamCMD...' : 'Updating Palworld Dedicated Server with SteamCMD...');
     let code = await this.run(steamcmd, args, captureOutput);
     if (code !== 0) {
-      onOutput('SteamCMD exited during install; retrying once in case it self-updated.');
+      onOutput('SteamCMD exited during update; retrying once in case it self-updated.');
       code = await this.run(steamcmd, args, captureOutput);
     }
     if (code !== 0) {
@@ -42,6 +55,18 @@ export class SteamCmdService {
     if (!(await this.exists(join(resolvedInstallDirectory, 'PalServer.exe')))) {
       throw new BadRequestException('SteamCMD finished, but PalServer.exe was not found in the install directory.');
     }
+  }
+
+  async updateAvailability(installDirectory: string): Promise<SteamAppUpdateAvailability> {
+    const [installedBuildId, latestBuildId] = await Promise.all([
+      this.installedBuildId(installDirectory),
+      this.latestPublicBuildId(),
+    ]);
+    return {
+      installedBuildId,
+      latestBuildId,
+      updateAvailable: this.isNewerBuild(latestBuildId, installedBuildId),
+    };
   }
 
   private async ensureSteamCmd(onOutput: (line: string) => void): Promise<string> {
@@ -83,6 +108,43 @@ export class SteamCmdService {
 
   private async exists(path: string): Promise<boolean> {
     return Boolean(await stat(path).catch(() => null));
+  }
+
+  private async installedBuildId(installDirectory: string): Promise<string | null> {
+    const manifest = join(this.resolvePath(installDirectory), 'steamapps', `appmanifest_${PALWORLD_DEDICATED_SERVER_APP_ID}.acf`);
+    const text = await readFile(manifest, 'utf8').catch(() => '');
+    return this.matchBuildId(text);
+  }
+
+  private async latestPublicBuildId(): Promise<string | null> {
+    if (this.latestPublicBuildCache && this.latestPublicBuildCache.expiresAt > Date.now()) {
+      return this.latestPublicBuildCache.buildId;
+    }
+    const steamcmd = await this.ensureSteamCmd(() => undefined);
+    const output: string[] = [];
+    const code = await this.run(
+      steamcmd,
+      ['+login', 'anonymous', '+app_info_update', '1', '+app_info_print', PALWORLD_DEDICATED_SERVER_APP_ID, '+quit'],
+      (line) => output.push(line),
+    );
+    if (code !== 0) {
+      return null;
+    }
+    const text = output.join('\n');
+    const buildId = /"branches"\s*\{[\s\S]*?"public"\s*\{[\s\S]*?"buildid"\s*"(\d+)"/i.exec(text)?.[1] ?? null;
+    this.latestPublicBuildCache = { buildId, expiresAt: Date.now() + 5 * 60 * 1000 };
+    return buildId;
+  }
+
+  private matchBuildId(text: string): string | null {
+    return /"buildid"\s*"(\d+)"/i.exec(text)?.[1] ?? null;
+  }
+
+  private isNewerBuild(latestBuildId: string | null, installedBuildId: string | null): boolean {
+    if (!latestBuildId || !installedBuildId) {
+      return false;
+    }
+    return Number.parseInt(latestBuildId, 10) > Number.parseInt(installedBuildId, 10);
   }
 
   private run(command: string, args: string[], onOutput: (line: string) => void): Promise<number | null> {

@@ -70,6 +70,15 @@ export class UpsertServerInstanceDto {
 
   @IsBoolean()
   backupBeforeRestart = false;
+
+  @IsBoolean()
+  backupBeforeUpdate = false;
+
+  @IsBoolean()
+  backupBeforeConfigChange = false;
+
+  @IsBoolean()
+  forceStopAfterGracefulTimeout = false;
 }
 
 export class DeployServerInstanceDto {
@@ -128,6 +137,15 @@ export class DeployServerInstanceDto {
 
   @IsBoolean()
   backupBeforeRestart = false;
+
+  @IsBoolean()
+  backupBeforeUpdate = false;
+
+  @IsBoolean()
+  backupBeforeConfigChange = false;
+
+  @IsBoolean()
+  forceStopAfterGracefulTimeout = false;
 
   @IsBoolean()
   startAfterInstall = true;

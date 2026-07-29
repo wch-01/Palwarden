@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ServerInstance } from '@prisma/client';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { cpus } from 'node:os';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import type { RuntimeState } from '@palwarden/shared';
@@ -10,6 +11,16 @@ interface TrackedProcess {
   child: ChildProcessWithoutNullStreams;
   startedAt: number;
   state: RuntimeState;
+}
+
+interface CpuSample {
+  cpuSeconds: number;
+  sampledAt: number;
+}
+
+interface CpuWindow {
+  values: number[];
+  peak: number;
 }
 
 const PALWORLD_PROCESS_NAMES = new Set(['palserver.exe', 'palserver-win64-shipping-cmd.exe']);
@@ -38,6 +49,8 @@ export function buildPalServerLaunchArguments(instance: ServerInstance): string[
 export class WindowsServerProcessAdapter implements ServerProcessAdapter {
   private readonly processes = new Map<string, TrackedProcess>();
   private readonly buffers = new Map<string, string[]>();
+  private readonly cpuSamples = new Map<number, CpuSample>();
+  private readonly cpuWindows = new Map<number, CpuWindow>();
 
   async start(instance: ServerInstance): Promise<ServerProcessResult> {
     const existing = this.processes.get(instance.id);
@@ -96,6 +109,7 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       state,
       ...(tracked.child.pid ? { pid: tracked.child.pid } : {}),
       uptimeSeconds: Math.floor((Date.now() - tracked.startedAt) / 1000),
+      ...this.hostMetrics(tracked.child.pid),
     };
   }
 
@@ -124,6 +138,7 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       state: 'running',
       ...(processes[0] ? { pid: processes[0].pid } : {}),
       uptimeSeconds: 0,
+      ...(processes[0] ? this.hostMetrics(processes[0].pid) : {}),
     };
   }
 
@@ -174,6 +189,93 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       })
       .map((record) => ({ pid: record.ProcessId ?? 0 }))
       .filter((record) => record.pid > 0);
+  }
+
+  private hostMetrics(
+    pid: number | undefined,
+  ): Pick<
+    ServerProcessStatus,
+    'hostCpuPercent' | 'hostMemoryMb' | 'processCpuAveragePercent' | 'processCpuPeakPercent' | 'processPrivateMemoryMb' | 'processPeakMemoryMb'
+  > {
+    if (!pid) {
+      return {
+        hostCpuPercent: null,
+        hostMemoryMb: null,
+        processCpuAveragePercent: null,
+        processCpuPeakPercent: null,
+        processPrivateMemoryMb: null,
+        processPeakMemoryMb: null,
+      };
+    }
+    return this.windowsProcessMetrics(pid, cpus().length);
+  }
+
+  private windowsProcessMetrics(
+    pid: number,
+    logicalCores: number,
+  ): Pick<
+    ServerProcessStatus,
+    'hostCpuPercent' | 'hostMemoryMb' | 'processCpuAveragePercent' | 'processCpuPeakPercent' | 'processPrivateMemoryMb' | 'processPeakMemoryMb'
+  > {
+    const empty = {
+      hostCpuPercent: null,
+      hostMemoryMb: null,
+      processCpuAveragePercent: null,
+      processCpuPeakPercent: null,
+      processPrivateMemoryMb: null,
+      processPeakMemoryMb: null,
+    };
+    const script = `Get-Process -Id ${pid} -ErrorAction SilentlyContinue | Select-Object CPU,WorkingSet64,PrivateMemorySize64,PeakWorkingSet64 | ConvertTo-Json -Compress`;
+    const output = this.runPowerShellSync(script);
+    if (!output.trim()) {
+      return empty;
+    }
+    try {
+      const record = JSON.parse(output) as { CPU?: number; WorkingSet64?: number; PrivateMemorySize64?: number; PeakWorkingSet64?: number };
+      const now = Date.now();
+      const previous = this.cpuSamples.get(pid);
+      const cpuSeconds = Number(record.CPU ?? 0);
+      this.cpuSamples.set(pid, { cpuSeconds, sampledAt: now });
+      const hostCpuPercent = previous
+        ? Math.max(0, Math.min(100, ((cpuSeconds - previous.cpuSeconds) / ((now - previous.sampledAt) / 1000) / Math.max(logicalCores, 1)) * 100))
+        : null;
+      const cpuWindow = this.recordCpuValue(pid, hostCpuPercent);
+      return {
+        hostCpuPercent: hostCpuPercent === null ? null : Math.round(hostCpuPercent * 10) / 10,
+        hostMemoryMb: record.WorkingSet64 ? Math.round((record.WorkingSet64 / 1024 / 1024) * 10) / 10 : null,
+        processCpuAveragePercent: cpuWindow.average,
+        processCpuPeakPercent: cpuWindow.peak,
+        processPrivateMemoryMb: record.PrivateMemorySize64 ? Math.round((record.PrivateMemorySize64 / 1024 / 1024) * 10) / 10 : null,
+        processPeakMemoryMb: record.PeakWorkingSet64 ? Math.round((record.PeakWorkingSet64 / 1024 / 1024) * 10) / 10 : null,
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  private recordCpuValue(pid: number, value: number | null): { average: number | null; peak: number | null } {
+    const window = this.cpuWindows.get(pid) ?? { values: [], peak: 0 };
+    if (value !== null && Number.isFinite(value)) {
+      window.values = [...window.values, value].slice(-20);
+      window.peak = Math.max(window.peak, value);
+      this.cpuWindows.set(pid, window);
+    }
+    if (!window.values.length) {
+      return { average: null, peak: null };
+    }
+    return {
+      average: Math.round((window.values.reduce((sum, item) => sum + item, 0) / window.values.length) * 10) / 10,
+      peak: Math.round(window.peak * 10) / 10,
+    };
+  }
+
+  private runPowerShellSync(script: string): string {
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], {
+      shell: false,
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+    return result.stdout ?? '';
   }
 
   private runPowerShell(script: string): Promise<string> {

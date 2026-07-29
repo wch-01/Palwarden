@@ -9,6 +9,8 @@ coverage/
 /data/
 /logs/
 .palwarden-data/
+.palwarden-dev.*
+.reference/
 .pnpm-store/
 outputs/
 test-results/

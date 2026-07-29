@@ -23,7 +23,7 @@ The reference application, branded AutoPalExpress, is a Windows-focused Palworld
 - World settings editing by parsing `PalWorldSettings.ini`.
 - Launcher options for game port, query port, public lobby, public IP/port overrides, performance flags, and JSON logs.
 - Query-port collision handling so `-queryport` does not steal the game port.
-- Mods and UE4SS workflows.
+- Mods, Nexus Mods, and UE4SS workflows.
 - Backups and scheduled maintenance.
 - Windows startup recovery, diagnostics, firewall and UPnP helpers.
 - App and activity logs, plus language selection.
@@ -40,6 +40,9 @@ The reference application, branded AutoPalExpress, is a Windows-focused Palworld
 - Request a REST save before backups or shutdown when possible.
 - Use the installed server's own default settings template instead of hardcoding the entire Palworld settings schema.
 - Treat "deploy new server" and "import existing server" as separate workflows. AutoPalExpress deploys new servers by downloading/locating SteamCMD, running anonymous `app_update 2394010 validate` into a per-server folder, writing initial `PalWorldSettings.ini`, registering the instance, and streaming progress while the long-running download happens.
+- Store the Nexus Mods API key once at the host/application level, not once per Palworld server. The reference validates the key against Nexus, exposes only connection state to the UI, and uses the key for privileged direct-download flows.
+- Manage UE4SS mods by moving folders between the live `Pal/Binaries/Win64/Mods` folder and a disabled staging area. This keeps disabled mods available without loading them.
+- Treat Nexus downloads as a privileged host action: regular admins can request mods, while the host/super-admin approves installs that use the saved Nexus key.
 
 ## Patterns Palwarden should not copy
 
@@ -49,6 +52,7 @@ The reference application, branded AutoPalExpress, is a Windows-focused Palworld
 - Some Windows-specific logic is mixed into feature services; Palwarden keeps OS behavior behind adapters.
 - The reference has a single active server concept for some features. Palwarden models every route by server instance ID.
 - The reference can force-kill after stop timeouts. Palwarden's normal stop path should not force-kill unless a policy or explicit force-stop command allows it.
+- The reference has Python-specific archive extraction and route code. Palwarden reimplements these behaviors in TypeScript rather than copying source.
 
 ## Current Palworld REST API details
 
@@ -70,3 +74,5 @@ The official docs state that REST requires `RESTAPIEnabled=True`, uses HTTP Basi
 ## Differences from Palwarden
 
 Palwarden is a new Node.js/TypeScript application using NestJS, Angular, Ionic, Prisma, SQLite, database sessions, Argon2id, CSRF protection, encrypted credentials, per-instance routes, Swagger documentation, and an explicit process adapter boundary. Palwarden now includes an initial SteamCMD deploy-new flow for fresh servers; updates, scheduled backups, mods, and advanced player administration remain planned follow-up work.
+
+As of the current mods milestone, Palwarden supports host-level Nexus key storage plus per-server local mod inventory and local enable, disable, remove, and reorder operations. Nexus browse/download/update and request-approval flows remain follow-up work.

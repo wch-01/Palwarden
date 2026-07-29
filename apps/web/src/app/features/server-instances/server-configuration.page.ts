@@ -61,6 +61,15 @@ const GROUP_ORDER = [
             <p class="muted">{{ advancedEntries().length }} more settings are available from PalWorldSettings.ini.</p>
           }
         </article>
+
+        @if (validationWarnings().length) {
+          <article class="panel warning-panel">
+            <h2>Review Before Saving</h2>
+            @for (warning of validationWarnings(); track warning) {
+              <p>{{ warning }}</p>
+            }
+          </article>
+        }
       </section>
 
       <footer class="config-savebar">
@@ -152,6 +161,7 @@ export class ServerConfigurationPage implements OnInit, OnDestroy {
   readonly advancedEntries = computed(() => this.entries().filter((entry) => !entry.popular && entry.group !== 'Local API'));
   readonly popularGroups = computed(() => this.groupEntries(this.popularEntries()));
   readonly advancedGroups = computed(() => this.groupEntries(this.advancedEntries()));
+  readonly validationWarnings = computed(() => this.configWarnings());
 
   ngOnInit(): void {
     this.refreshServer();
@@ -235,6 +245,9 @@ export class ServerConfigurationPage implements OnInit, OnDestroy {
         values[key] = value;
       }
     }
+    if (this.validationWarnings().length && !(await this.confirmSaveWithWarnings())) {
+      return;
+    }
     this.saving.set(true);
     const savingDialog = await this.loading.create({
       message: 'Saving server configuration...',
@@ -274,6 +287,57 @@ export class ServerConfigurationPage implements OnInit, OnDestroy {
       ],
     });
     await alert.present();
+  }
+
+  private async confirmSaveWithWarnings(): Promise<boolean> {
+    return new Promise((resolve) => {
+      void this.alerts
+        .create({
+          header: 'Save with warnings?',
+          message: this.validationWarnings().join('\n'),
+          buttons: [
+            { text: 'Review', role: 'cancel', handler: () => resolve(false) },
+            { text: 'Save anyway', role: 'confirm', handler: () => resolve(true) },
+          ],
+        })
+        .then((alert) => alert.present());
+    });
+  }
+
+  private configWarnings(): string[] {
+    const value = (key: string) => this.draft()[key];
+    const warnings: string[] = [];
+    const maxPlayers = Number(value('ServerPlayerMaxNum'));
+    if (this.dirty().has('ServerPlayerMaxNum') && Number.isFinite(maxPlayers) && maxPlayers > 32) {
+      warnings.push('High max-player counts can increase CPU, memory, and network load.');
+    }
+    const restEnabled = value('RESTAPIEnabled');
+    if (this.dirty().has('RESTAPIEnabled') && restEnabled !== true && restEnabled !== 'True') {
+      warnings.push('Disabling the REST API will prevent Palwarden from reading live status and sending server actions.');
+    }
+    const adminPassword = String(value('AdminPassword') ?? '').trim();
+    if (this.dirty().has('AdminPassword') && adminPassword.length > 0 && adminPassword.length < 8) {
+      warnings.push('The Admin Password is short. Use a stronger password for Palwarden API access.');
+    }
+    const serverPassword = String(value('ServerPassword') ?? '').trim();
+    if (this.dirty().has('ServerPassword') && serverPassword.length > 0 && serverPassword.length < 8) {
+      warnings.push('The server join password is short. Consider a stronger password.');
+    }
+    for (const key of ['PublicPort', 'RCONPort', 'RESTAPIPort']) {
+      const numeric = Number(value(key));
+      if (this.dirty().has(key) && (!Number.isInteger(numeric) || numeric < 1 || numeric > 65535)) {
+        warnings.push(`${key} must be a valid port between 1 and 65535.`);
+      }
+    }
+    const daySpeed = Number(value('DayTimeSpeedRate'));
+    const nightSpeed = Number(value('NightTimeSpeedRate'));
+    if (this.dirty().has('DayTimeSpeedRate') && Number.isFinite(daySpeed) && (daySpeed <= 0 || daySpeed > 10)) {
+      warnings.push('Day speed outside 0-10 may make world time behave unexpectedly.');
+    }
+    if (this.dirty().has('NightTimeSpeedRate') && Number.isFinite(nightSpeed) && (nightSpeed <= 0 || nightSpeed > 10)) {
+      warnings.push('Night speed outside 0-10 may make world time behave unexpectedly.');
+    }
+    return warnings;
   }
 
   private setDraftValue(entry: ServerConfigEntry, value: ConfigValue): void {

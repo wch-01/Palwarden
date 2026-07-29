@@ -1,6 +1,19 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import type { ServerDashboardCard, ServerInstanceView } from '@palwarden/shared';
+import type {
+  NexusConnectionState,
+  NexusInstallPreview,
+  NexusInstallTargetKind,
+  NexusModFile,
+  NexusModSummary,
+  ServerDashboardCard,
+  ServerImportPreview,
+  ServerInstanceView,
+  ServerLogResult,
+  ServerModInventory,
+  ServerModRequest,
+  Ue4ssStatus,
+} from '@palwarden/shared';
 import { AuthService } from '../../core/authentication/auth.service';
 
 export interface ServerPayload {
@@ -21,6 +34,9 @@ export interface ServerPayload {
   autoStart: boolean;
   autoRestart: boolean;
   backupBeforeRestart: boolean;
+  backupBeforeUpdate: boolean;
+  backupBeforeConfigChange: boolean;
+  forceStopAfterGracefulTimeout: boolean;
 }
 
 export interface DeployServerPayload {
@@ -38,6 +54,9 @@ export interface DeployServerPayload {
   autoStart: boolean;
   autoRestart: boolean;
   backupBeforeRestart: boolean;
+  backupBeforeUpdate: boolean;
+  backupBeforeConfigChange: boolean;
+  forceStopAfterGracefulTimeout: boolean;
   startAfterInstall: boolean;
 }
 
@@ -49,8 +68,32 @@ export interface DeployJob {
   serverInstanceId: string | null;
 }
 
+export interface UpdateServerPayload {
+  broadcastMessage?: string;
+  shutdownWaitSeconds?: number;
+}
+
+export interface ServerUpdateAvailability {
+  installedBuildId: string | null;
+  latestBuildId: string | null;
+  updateAvailable: boolean;
+}
+
 export interface ServerRoster {
-  players: Array<{ name?: string; level?: number; steamid?: string }>;
+  players: Array<{
+    name?: string;
+    accountName?: string;
+    playerId?: string;
+    playeruid?: string;
+    steamid?: string;
+    userId?: string;
+    ip?: string;
+    ping?: number;
+    level?: number;
+    location_x?: number;
+    location_y?: number;
+    building_count?: number;
+  }>;
   guilds: Array<Record<string, unknown>>;
 }
 
@@ -66,6 +109,17 @@ export interface ServerConfigEntry {
   sensitive: boolean;
   configured: boolean;
   popular: boolean;
+}
+
+export interface BackupRecordView {
+  id: string;
+  serverInstanceId: string;
+  triggerType: string;
+  filePath: string;
+  sizeBytes: number;
+  success: boolean;
+  failureMessage: string | null;
+  createdAt: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -95,12 +149,42 @@ export class ServerInstancesService {
     });
   }
 
+  importPreview(installationDirectory: string, displayName: string) {
+    return this.http.get<ServerImportPreview>('/api/server-instances/import-preview', {
+      params: { installationDirectory, displayName },
+    });
+  }
+
+  nexusState() {
+    return this.http.get<NexusConnectionState>('/api/server-instances/nexus');
+  }
+
+  saveNexusApiKey(apiKey: string) {
+    return this.http.put<NexusConnectionState>('/api/server-instances/nexus', { apiKey });
+  }
+
+  removeNexusApiKey() {
+    return this.http.delete<NexusConnectionState>('/api/server-instances/nexus');
+  }
+
+  nexusMods(list: 'trending' | 'latest_added' | 'latest_updated', query = '') {
+    return this.http.get<NexusModSummary[]>('/api/server-instances/nexus/mods', { params: query.trim() ? { list, q: query.trim() } : { list } });
+  }
+
+  searchNexusMods(query: string) {
+    return this.http.get<NexusModSummary[]>('/api/server-instances/nexus/search', { params: { q: query.trim() } });
+  }
+
   deploy(payload: DeployServerPayload) {
     return this.deployWithImageFallback(payload);
   }
 
   deployStatus(id: string) {
     return this.http.get<DeployJob>(`/api/server-instances/deploy/${id}`);
+  }
+
+  maintenanceStatus(id: string) {
+    return this.http.get<DeployJob>(`/api/server-instances/maintenance/${id}`);
   }
 
   update(id: string, payload: ServerPayload) {
@@ -127,6 +211,14 @@ export class ServerInstancesService {
     return this.http.post(`/api/server-instances/${id}/restart`, {});
   }
 
+  updateServer(id: string, payload: UpdateServerPayload = {}) {
+    return this.http.post<DeployJob>(`/api/server-instances/${id}/update`, payload);
+  }
+
+  validateServer(id: string) {
+    return this.http.post<DeployJob>(`/api/server-instances/${id}/validate`, {});
+  }
+
   saveWorld(id: string) {
     return this.http.post(`/api/server-instances/${id}/save`, {});
   }
@@ -140,15 +232,115 @@ export class ServerInstancesService {
   }
 
   backup(id: string) {
-    return this.http.post<{ ok: boolean; message: string }>(`/api/server-instances/${id}/backup`, {});
+    return this.http.post<BackupRecordView>(`/api/server-instances/${id}/backups`, {});
+  }
+
+  backups(id: string) {
+    return this.http.get<BackupRecordView[]>(`/api/server-instances/${id}/backups`);
+  }
+
+  deleteBackup(id: string, backupId: string) {
+    return this.http.delete<{ ok: true }>(`/api/server-instances/${id}/backups/${backupId}`);
+  }
+
+  deleteFailedBackups(id: string) {
+    return this.http.delete<{ ok: true; deleted: number }>(`/api/server-instances/${id}/backups/failed`);
+  }
+
+  restoreBackup(id: string, backupId: string) {
+    return this.http.post<{ ok: true; emergencyBackup: BackupRecordView | null }>(`/api/server-instances/${id}/backups/${backupId}/restore`, {});
   }
 
   testConnection(id: string) {
     return this.http.post(`/api/server-instances/${id}/test-connection`, {});
   }
 
+  updateAvailability(id: string) {
+    return this.http.get<ServerUpdateAvailability>(`/api/server-instances/${id}/update-availability`);
+  }
+
   roster(id: string) {
     return this.http.get<ServerRoster>(`/api/server-instances/${id}/roster`);
+  }
+
+  mods(id: string) {
+    return this.http.get<ServerModInventory>(`/api/server-instances/${id}/mods`);
+  }
+
+  ue4ssStatus(id: string) {
+    return this.http.get<Ue4ssStatus>(`/api/server-instances/${id}/ue4ss`);
+  }
+
+  installUe4ss(id: string) {
+    return this.http.post<Ue4ssStatus>(`/api/server-instances/${id}/ue4ss/install`, {});
+  }
+
+  uninstallUe4ss(id: string) {
+    return this.http.post<Ue4ssStatus>(`/api/server-instances/${id}/ue4ss/uninstall`, {});
+  }
+
+  modRequests(id: string) {
+    return this.http.get<ServerModRequest[]>(`/api/server-instances/${id}/mods/requests`);
+  }
+
+  requestNexusMod(id: string, mod: Pick<NexusModSummary, 'modId' | 'name' | 'author' | 'summary' | 'pictureUrl'>) {
+    return this.http.post<ServerModRequest[]>(`/api/server-instances/${id}/mods/requests`, { ...mod, nexusModId: mod.modId });
+  }
+
+  approveModRequest(id: string, requestId: string) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/requests/${requestId}/approve`, {});
+  }
+
+  denyModRequest(id: string, requestId: string) {
+    return this.http.post<ServerModRequest[]>(`/api/server-instances/${id}/mods/requests/${requestId}/deny`, {});
+  }
+
+  nexusModFiles(id: string, nexusModId: number) {
+    return this.http.get<NexusModFile[]>(`/api/server-instances/${id}/mods/nexus/${nexusModId}/files`);
+  }
+
+  previewNexusModInstall(id: string, nexusModId: number, fileId?: number) {
+    return this.http.post<NexusInstallPreview>(`/api/server-instances/${id}/mods/nexus/${nexusModId}/preview`, fileId ? { fileId } : {});
+  }
+
+  installNexusMod(id: string, nexusModId: number, fileId?: number, targetKind?: NexusInstallTargetKind, folderName?: string) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/nexus/${nexusModId}/install`, {
+      ...(fileId ? { fileId } : {}),
+      ...(targetKind ? { targetKind } : {}),
+      ...(folderName ? { folderName } : {}),
+    });
+  }
+
+  updateNexusMod(id: string, modId: string, fileId?: number) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/${encodeURIComponent(modId)}/update`, fileId ? { fileId } : {});
+  }
+
+  enableMod(id: string, modId: string) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/${encodeURIComponent(modId)}/enable`, {});
+  }
+
+  disableMod(id: string, modId: string) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/${encodeURIComponent(modId)}/disable`, {});
+  }
+
+  removeMod(id: string, modId: string) {
+    return this.http.delete<ServerModInventory>(`/api/server-instances/${id}/mods/${encodeURIComponent(modId)}`);
+  }
+
+  reorderMods(id: string, orderedIds: string[]) {
+    return this.http.post<ServerModInventory>(`/api/server-instances/${id}/mods/reorder`, { orderedIds });
+  }
+
+  kickPlayer(id: string, userId: string, message?: string) {
+    return this.http.post<{ ok: true }>(`/api/server-instances/${id}/players/kick`, { userId, message });
+  }
+
+  banPlayer(id: string, userId: string, message?: string) {
+    return this.http.post<{ ok: true }>(`/api/server-instances/${id}/players/ban`, { userId, message });
+  }
+
+  unbanPlayer(id: string, userId: string) {
+    return this.http.post<{ ok: true }>(`/api/server-instances/${id}/players/unban`, { userId });
   }
 
   configuration(id: string) {
@@ -161,8 +353,23 @@ export class ServerInstancesService {
     return this.http.put<{ entries: ServerConfigEntry[] }>(`/api/server-instances/${id}/configuration`, { values });
   }
 
-  logs(id: string) {
-    return this.http.get<{ lines: string[] }>(`/api/server-instances/${id}/logs`);
+  logs(id: string, filters: { q?: string; stream?: string; limit?: number } = {}) {
+    return this.http.get<ServerLogResult>(`/api/server-instances/${id}/logs`, {
+      params: {
+        ...(filters.q ? { q: filters.q } : {}),
+        ...(filters.stream ? { stream: filters.stream } : {}),
+        ...(filters.limit ? { limit: String(filters.limit) } : {}),
+      },
+    });
+  }
+
+  logsDownloadUrl(id: string, filters: { q?: string; stream?: string; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (filters.q) params.set('q', filters.q);
+    if (filters.stream) params.set('stream', filters.stream);
+    if (filters.limit) params.set('limit', String(filters.limit));
+    const query = params.toString();
+    return `/api/server-instances/${id}/logs/download${query ? `?${query}` : ''}`;
   }
 
   private async deployWithNativeFetch(payload: DeployServerPayload): Promise<DeployJob> {
@@ -247,6 +454,9 @@ export class ServerInstancesService {
     params.set('autoStart', String(payload.autoStart));
     params.set('autoRestart', String(payload.autoRestart));
     params.set('backupBeforeRestart', String(payload.backupBeforeRestart));
+    params.set('backupBeforeUpdate', String(payload.backupBeforeUpdate));
+    params.set('backupBeforeConfigChange', String(payload.backupBeforeConfigChange));
+    params.set('forceStopAfterGracefulTimeout', String(payload.forceStopAfterGracefulTimeout));
     params.set('startAfterInstall', String(payload.startAfterInstall));
     return params.toString();
   }

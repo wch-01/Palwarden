@@ -18,6 +18,8 @@ enum AuditAction {
   LOGIN_FAILURE
   LOGOUT
   USER_CREATED
+  USER_UPDATED
+  USER_DELETED
   SERVER_CREATED
   SERVER_UPDATED
   SERVER_DELETED
@@ -32,9 +34,11 @@ model User {
   username     String   @unique
   passwordHash String
   role         UserRole
+  disabled     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   sessions     Session[]
+  modRequests  ModRequest[]
 }
 
 model Session {
@@ -81,9 +85,75 @@ model ServerInstance {
   autoStart                  Boolean  @default(false)
   autoRestart                Boolean  @default(false)
   backupBeforeRestart        Boolean  @default(false)
+  backupBeforeUpdate         Boolean  @default(false)
+  backupBeforeConfigChange   Boolean  @default(false)
+  forceStopAfterGracefulTimeout Boolean @default(false)
   shutdownWaitSeconds        Int      @default(30)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
+  mods                       ManagedMod[]
+  modRequests                ModRequest[]
+  ue4ssInstall               Ue4ssInstall?
+}
+
+model AppSecret {
+  key        String   @id
+  ciphertext String
+  iv         String
+  tag        String
+  metadata   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ManagedMod {
+  id               String   @id @default(cuid())
+  serverInstanceId String
+  sourceKey        String
+  name             String
+  kind             String
+  folderName       String?
+  relativePath     String
+  status           String   @default("enabled")
+  loadPriority     Int      @default(0)
+  version          String?
+  author           String?
+  description      String?
+  sourceModId      Int?
+  downloadedFile   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  serverInstance   ServerInstance @relation(fields: [serverInstanceId], references: [id], onDelete: Cascade)
+
+  @@unique([serverInstanceId, sourceKey])
+  @@index([serverInstanceId, loadPriority])
+}
+
+model ModRequest {
+  id                  String   @id @default(cuid())
+  serverInstanceId    String
+  nexusModId          Int
+  name                String
+  author              String
+  summary             String   @default("")
+  pictureUrl          String?
+  requestedByUserId   String?
+  status              String   @default("pending")
+  createdAt           DateTime @default(now())
+  decidedAt           DateTime?
+  serverInstance      ServerInstance @relation(fields: [serverInstanceId], references: [id], onDelete: Cascade)
+  requestedBy         User?    @relation(fields: [requestedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([serverInstanceId, createdAt])
+}
+
+model Ue4ssInstall {
+  serverInstanceId String   @id
+  version          String?
+  managedPathsJson String   @default("[]")
+  installedAt      DateTime?
+  updatedAt        DateTime @updatedAt
+  serverInstance   ServerInstance @relation(fields: [serverInstanceId], references: [id], onDelete: Cascade)
 }
 
 model BackupRecord {

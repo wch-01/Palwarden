@@ -17,14 +17,17 @@ The first milestone uses pnpm workspaces. Production deployments serve the Angul
 
 The backend is organized by feature under `apps/api/src/features`. Cross-cutting services live under `core`.
 
-Implemented first-slice features:
+Implemented application features:
 
 - Setup and authentication.
 - Database-backed server sessions.
 - Role guards for `OWNER`, `ADMIN`, and `VIEWER`.
 - Server instance CRUD.
 - AES-256-GCM encrypted Palworld AdminPassword storage.
-- Typed Palworld REST client for info and metrics in the first UI slice, with models for the wider documented API.
+- Typed Palworld REST client for info, metrics, players, announcements, moderation, save, and shutdown operations.
+- SteamCMD deploy-new flow for fresh Palworld Dedicated Server installs.
+- Palworld settings file reader/writer for `PalWorldSettings.ini`.
+- Manual backup, restore, delete, and failed-record cleanup.
 - Windows process adapter using `child_process.spawn`.
 - In-memory runtime status and per-instance log streaming.
 - Audit log records for administrative actions.
@@ -42,14 +45,17 @@ The web app uses Angular standalone components, lazy-loaded feature routes, and 
 - `/setup`
 - `/login`
 - `/dashboard`
-- `/servers`
 - `/servers/new`
 - `/servers/:id`
 - `/servers/:id/overview`
 - `/servers/:id/logs`
 - `/servers/:id/settings`
+- `/servers/:id/control`
+- `/servers/:id/players`
 - `/settings`
 - `/settings/users`
+- `/mods`
+- `/host/launcher-options`
 
 The dashboard is desktop-first and responsive. It talks only to Palwarden's backend.
 
@@ -72,6 +78,7 @@ Every Palworld server instance creates a REST client using that instance's host,
 ## Assumptions
 
 - Windows 11 is the initial host target.
-- Palwarden controls existing local Palworld installations in the first milestone; SteamCMD install/update comes later.
+- Palwarden can deploy fresh Palworld servers with SteamCMD. SteamCMD update and validate actions are still planned.
 - `PALWARDEN_MASTER_KEY` is a base64-encoded 32-byte key.
 - The REST username is `admin`, with the Palworld AdminPassword as the Basic Auth password.
+- Settings that are not supported by Palworld runtime APIs are edited through the server's config file and generally require a restart.

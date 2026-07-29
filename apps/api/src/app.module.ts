@@ -7,6 +7,7 @@ import { DatabaseModule } from './core/database/database.module';
 import { CsrfGuard } from './core/security/csrf.guard';
 import { AuthModule } from './features/auth/auth.module';
 import { ServerInstancesModule } from './features/server-instances/server-instances.module';
+import { UsersModule } from './features/users/users.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ServerInstancesModule } from './features/server-instances/server-instan
     }),
     DatabaseModule,
     AuthModule,
+    UsersModule,
     ServerInstancesModule,
   ],
   providers: [

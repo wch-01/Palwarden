@@ -38,6 +38,9 @@ import { ServerInstancesService } from './server-instances.service';
         <ion-item><ion-toggle formControlName="autoStart">Auto-start</ion-toggle></ion-item>
         <ion-item><ion-toggle formControlName="autoRestart">Auto-restart</ion-toggle></ion-item>
         <ion-item><ion-toggle formControlName="backupBeforeRestart">Backup before restart</ion-toggle></ion-item>
+        <ion-item><ion-toggle formControlName="backupBeforeUpdate">Backup before update</ion-toggle></ion-item>
+        <ion-item><ion-toggle formControlName="backupBeforeConfigChange">Backup before config changes</ion-toggle></ion-item>
+        <ion-item><ion-toggle formControlName="forceStopAfterGracefulTimeout">Force stop after graceful timeout</ion-toggle></ion-item>
       </ion-list>
       @if (!id) {
         <p class="content">
@@ -99,6 +102,9 @@ export class ServerFormPage implements OnInit, OnDestroy {
     autoStart: [false],
     autoRestart: [false],
     backupBeforeRestart: [false],
+    backupBeforeUpdate: [false],
+    backupBeforeConfigChange: [false],
+    forceStopAfterGracefulTimeout: [false],
     startAfterInstall: [true],
   });
 
@@ -195,6 +201,9 @@ export class ServerFormPage implements OnInit, OnDestroy {
         autoStart: raw.autoStart,
         autoRestart: raw.autoRestart,
         backupBeforeRestart: raw.backupBeforeRestart,
+        backupBeforeUpdate: raw.backupBeforeUpdate,
+        backupBeforeConfigChange: raw.backupBeforeConfigChange,
+        forceStopAfterGracefulTimeout: raw.forceStopAfterGracefulTimeout,
         startAfterInstall,
         ...(adminPassword ? { adminPassword } : {}),
         ...(serverPassword ? { serverPassword } : {}),

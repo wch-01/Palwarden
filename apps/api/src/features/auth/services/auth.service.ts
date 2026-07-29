@@ -56,7 +56,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { username: normalized } });
     const valid = user ? await argon2.verify(user.passwordHash, password) : false;
     await this.prisma.loginAttempt.create({ data: { username: normalized, ipAddress, success: valid } });
-    if (!user || !valid) {
+    if (!user || !valid || user.disabled) {
       await this.audit.record({ action: 'LOGIN_FAILURE', message: 'Login failed.', metadata: { username: normalized } });
       throw new UnauthorizedException('Wrong username or password.');
     }
@@ -81,7 +81,7 @@ export class AuthService {
       return { user: null, csrfToken: '' };
     }
     const session = await this.prisma.session.findUnique({ where: { id: sessionId }, include: { user: true } });
-    if (!session || session.expiresAt < new Date()) {
+    if (!session || session.expiresAt < new Date() || session.user.disabled) {
       return { user: null, csrfToken: '' };
     }
     return {

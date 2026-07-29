@@ -28,6 +28,11 @@ export const routes: Routes = [
     loadComponent: () => import('./features/server-instances/server-configuration.page').then((m) => m.ServerConfigurationPage),
   },
   {
+    path: 'players',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/server-instances/players.page').then((m) => m.PlayersPage),
+  },
+  {
     path: 'mods',
     canActivate: [authGuard],
     loadComponent: () => import('./features/server-instances/mods.page').then((m) => m.ModsPage),
@@ -36,6 +41,11 @@ export const routes: Routes = [
     path: 'logs',
     canActivate: [authGuard],
     loadComponent: () => import('./features/logs/logs.page').then((m) => m.LogsPage),
+  },
+  {
+    path: 'audit-log',
+    canActivate: [authGuard, viewerGuard],
+    loadComponent: () => import('./features/audit-log/audit-log.page').then((m) => m.AuditLogPage),
   },
   {
     path: 'host/launcher-options',
@@ -64,7 +74,7 @@ export const routes: Routes = [
       },
       {
         path: 'players',
-        loadComponent: () => import('./features/server-instances/placeholder.page').then((m) => m.PlaceholderPage),
+        loadComponent: () => import('./features/server-instances/players.page').then((m) => m.PlayersPage),
       },
       {
         path: 'logs',
