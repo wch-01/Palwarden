@@ -5,6 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { IonButton, IonInput, IonItem, IonList, IonToggle } from '@ionic/angular/standalone';
 import type { Subscription } from 'rxjs';
 import { catchError, of } from 'rxjs';
+import { deployProgressView } from './deploy-progress';
 import { ServerInstancesService } from './server-instances.service';
 
 @Component({
@@ -51,13 +52,40 @@ import { ServerInstancesService } from './server-instances.service';
       }
       <ion-button type="submit" [disabled]="form.invalid || deploying">{{ id ? 'Save' : 'Install server' }}</ion-button>
     </form>
-    @if (deployLog.length) {
-      <section class="content">
-        <h2>Install progress</h2>
-        <pre>{{ deployLog.join('\\n') }}</pre>
-        @if (deployError) {
-          <p>{{ deployError }}</p>
-        }
+    @if (deploying || deployLog.length || deployError) {
+      <section class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Server install progress">
+        <div class="modal-panel deploy-progress-modal">
+          <header>
+            <h2>{{ deployProgress().title }}</h2>
+            @if (!deploying) {
+              <button type="button" class="icon-button" aria-label="Close install progress" (click)="dismissDeployProgress()">x</button>
+            }
+          </header>
+          <div class="loading-summary">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <div>
+              <strong>{{ deployProgress().step }}</strong>
+              <p class="muted">{{ deployProgress().detail }}</p>
+            </div>
+          </div>
+          <div class="progress-track" [class.indeterminate]="deployProgress().percent === null">
+            @if (deployProgress().percent !== null) {
+              <span [style.width.%]="deployProgress().percent"></span>
+            } @else {
+              <span></span>
+            }
+          </div>
+          @if (deployProgress().percent !== null) {
+            <p class="muted progress-percent">{{ deployProgress().percent }}%</p>
+          }
+          @if (deployProgress().failed) {
+            <p class="error-text">{{ deployError }}</p>
+          }
+          <details class="deploy-details">
+            <summary>View details</summary>
+            <pre>{{ deployProgress().log.join('\\n') }}</pre>
+          </details>
+        </div>
       </section>
     }
   `,
@@ -178,7 +206,7 @@ export class ServerFormPage implements OnInit, OnDestroy {
   ): Promise<void> {
     this.deploying = true;
     this.deployError = '';
-    this.deployLog = ['Direct deploy path active.', 'Sending deployment request to Palwarden...'];
+    this.deployLog = ['Sending deployment request to Palwarden...'];
     this.deployWatchdog = window.setTimeout(() => {
       if (this.deploying && this.deployLog.includes('Sending deployment request to Palwarden...')) {
         this.deploying = false;
@@ -187,7 +215,7 @@ export class ServerFormPage implements OnInit, OnDestroy {
       }
     }, 20000);
     try {
-      this.deployLog = [...this.deployLog, 'Calling backend deploy endpoint...'];
+      this.deployLog = [...this.deployLog, 'Starting deployment...'];
       const job = await this.service.deploy({
         displayName: raw.displayName,
         description: raw.description,
@@ -221,6 +249,16 @@ export class ServerFormPage implements OnInit, OnDestroy {
       this.deployError = error instanceof Error ? error.message : 'Could not start deployment.';
       this.deployLog = [...this.deployLog, this.deployError];
     }
+  }
+
+  deployProgress() {
+    return deployProgressView(this.deployLog, this.deployError ? 'error' : this.deploying ? 'running' : 'done', this.deployError || null);
+  }
+
+  dismissDeployProgress(): void {
+    if (this.deploying) return;
+    this.deployLog = [];
+    this.deployError = '';
   }
 
   private configureModeValidation(): void {

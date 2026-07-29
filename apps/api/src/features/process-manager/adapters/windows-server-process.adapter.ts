@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ServerInstance } from '@prisma/client';
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { cpus } from 'node:os';
+import { existsSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { basename, dirname, join, normalize, resolve } from 'node:path';
 import type { RuntimeState } from '@palwarden/shared';
 import type { ServerProcessAdapter, ServerProcessResult, ServerProcessStatus } from '../models/server-process-adapter';
 
@@ -58,14 +58,15 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       throw new BadRequestException('This server instance is already running.');
     }
     const args = buildPalServerLaunchArguments(instance);
-    const child = spawn(instance.executablePath, args, {
+    const executablePath = this.resolveLaunchExecutable(instance);
+    const child = spawn(executablePath, args, {
       cwd: instance.workingDirectory,
       shell: false,
-      windowsHide: false,
+      windowsHide: true,
     });
     const tracked: TrackedProcess = { child, startedAt: Date.now(), state: 'starting' };
     this.processes.set(instance.id, tracked);
-    this.pushLog(instance.id, `Started process ${child.pid ?? 'unknown'} with ${args.join(' ')}.`);
+    this.pushLog(instance.id, `Started process ${child.pid ?? 'unknown'} with ${executablePath} ${args.join(' ')}.`);
     child.stdout.on('data', (chunk: Buffer) => void this.writeOutput(instance.id, 'stdout', chunk));
     child.stderr.on('data', (chunk: Buffer) => void this.writeOutput(instance.id, 'stderr', chunk));
     child.on('exit', (code) => {
@@ -207,12 +208,11 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
         processPeakMemoryMb: null,
       };
     }
-    return this.windowsProcessMetrics(pid, cpus().length);
+    return this.windowsProcessMetrics(pid);
   }
 
   private windowsProcessMetrics(
     pid: number,
-    logicalCores: number,
   ): Pick<
     ServerProcessStatus,
     'hostCpuPercent' | 'hostMemoryMb' | 'processCpuAveragePercent' | 'processCpuPeakPercent' | 'processPrivateMemoryMb' | 'processPeakMemoryMb'
@@ -236,9 +236,9 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       const previous = this.cpuSamples.get(pid);
       const cpuSeconds = Number(record.CPU ?? 0);
       this.cpuSamples.set(pid, { cpuSeconds, sampledAt: now });
-      const hostCpuPercent = previous
-        ? Math.max(0, Math.min(100, ((cpuSeconds - previous.cpuSeconds) / ((now - previous.sampledAt) / 1000) / Math.max(logicalCores, 1)) * 100))
-        : null;
+      const elapsedSeconds = previous ? (now - previous.sampledAt) / 1000 : 0;
+      const processCpuPercent = previous && elapsedSeconds > 0 ? ((cpuSeconds - previous.cpuSeconds) / elapsedSeconds) * 100 : null;
+      const hostCpuPercent = processCpuPercent === null ? null : Math.max(0, Math.min(100, processCpuPercent));
       const cpuWindow = this.recordCpuValue(pid, hostCpuPercent);
       return {
         hostCpuPercent: hostCpuPercent === null ? null : Math.round(hostCpuPercent * 10) / 10,
@@ -289,6 +289,14 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
       child.on('error', () => resolve(''));
       child.on('exit', () => resolve(Buffer.concat(chunks).toString('utf8')));
     });
+  }
+
+  private resolveLaunchExecutable(instance: ServerInstance): string {
+    if (basename(instance.executablePath).toLowerCase() !== 'palserver.exe') {
+      return instance.executablePath;
+    }
+    const directServerExecutable = join(instance.installationDirectory, 'Pal', 'Binaries', 'Win64', 'PalServer-Win64-Shipping-Cmd.exe');
+    return existsSync(directServerExecutable) ? directServerExecutable : instance.executablePath;
   }
 
   private pathIsInside(value: string, root: string): boolean {

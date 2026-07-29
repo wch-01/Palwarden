@@ -37,8 +37,8 @@ const config = {
   PALWARDEN_COOKIE_SECURE: existing.PALWARDEN_COOKIE_SECURE || 'false',
   PALWARDEN_CORS_ORIGINS: existing.PALWARDEN_CORS_ORIGINS || `http://${host}:${port}`,
   PALWARDEN_MASTER_KEY: existing.PALWARDEN_MASTER_KEY || randomBytes(32).toString('base64'),
-  PALWARDEN_DATA_DIR: existing.PALWARDEN_DATA_DIR || dataRoot,
-  PALWARDEN_WEB_DIST: existing.PALWARDEN_WEB_DIST || webRoot,
+  PALWARDEN_DATA_DIR: dataRoot,
+  PALWARDEN_WEB_DIST: webRoot,
 };
 
 writeEnvFile(configPath, config);
@@ -46,6 +46,7 @@ Object.assign(process.env, config);
 
 writeLog(`Starting Palwarden from ${installRoot}`);
 writeLog(`Using data directory ${dataRoot}`);
+writeLog(`Serving web app from ${webRoot}`);
 runPrismaMigrations();
 startPalwarden();
 

@@ -365,8 +365,8 @@ import { selectServerFromRoute } from './selected-server';
             @for (mod of pagedNexusCatalog(); track mod.modId) {
               <article class="nexus-mod-card">
                 <div class="nexus-mod-media">
-                  @if (mod.pictureUrl) {
-                    <img [src]="mod.pictureUrl" alt="" />
+                  @if (mod.pictureUrl && !imageFailed(mod.pictureUrl)) {
+                    <img [src]="mod.pictureUrl" alt="" (error)="markImageFailed(mod.pictureUrl)" />
                   } @else {
                     <div class="nexus-mod-placeholder">No image</div>
                   }
@@ -433,8 +433,10 @@ import { selectServerFromRoute } from './selected-server';
             <div class="nexus-search-results">
               @for (mod of nexusSearchResults(); track mod.modId) {
                 <article class="nexus-search-result">
-                  @if (mod.pictureUrl) {
-                    <img [src]="mod.pictureUrl" alt="" />
+                  @if (mod.pictureUrl && !imageFailed(mod.pictureUrl)) {
+                    <img [src]="mod.pictureUrl" alt="" (error)="markImageFailed(mod.pictureUrl)" />
+                  } @else {
+                    <div class="nexus-mod-placeholder">No image</div>
                   }
                   <div>
                     <h3>{{ mod.name }}</h3>
@@ -586,6 +588,7 @@ export class ModsPage {
   readonly nexusSearchResults = signal<NexusModSummary[]>([]);
   readonly nexusSearchRan = signal(false);
   readonly nexusSearchMessage = signal('');
+  readonly failedImageUrls = signal<Set<string>>(new Set());
   readonly filePickerMod = signal<NexusModSummary | null>(null);
   readonly filePickerFiles = signal<NexusModFile[]>([]);
   readonly visibleFilePickerFiles = computed(() => {
@@ -960,6 +963,14 @@ export class ModsPage {
 
   formatDate(value: string | null): string {
     return value ? new Date(value).toLocaleString() : 'n/a';
+  }
+
+  imageFailed(url: string): boolean {
+    return this.failedImageUrls().has(url);
+  }
+
+  markImageFailed(url: string): void {
+    this.failedImageUrls.update((urls) => new Set(urls).add(url));
   }
 
   kindLabel(kind: ServerModKind): string {

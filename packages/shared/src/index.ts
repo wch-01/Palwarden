@@ -59,6 +59,7 @@ export interface ServerDashboardCard extends ServerInstanceView {
   saveDirectorySizeMb: number | null;
   backupDirectorySizeMb: number | null;
   driveFreeSpaceMb: number | null;
+  installedModCount: number | null;
 }
 
 export interface ServerLogEntry {

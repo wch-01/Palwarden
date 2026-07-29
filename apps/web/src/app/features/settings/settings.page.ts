@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/authentication/auth.service';
+import { deployProgressView } from '../server-instances/deploy-progress';
 import type { DeployJob, ServerPayload } from '../server-instances/server-instances.service';
 import { ServerInstancesService } from '../server-instances/server-instances.service';
 import type { HostNetworkSettings, NexusConnectionState, ServerDashboardCard, ServerImportPreview, UserRole } from '@palwarden/shared';
@@ -354,10 +355,44 @@ import type { ManagedUser } from './users.service';
             <button type="button" class="secondary" (click)="useDefaultDeployPath()">Use default path</button>
             <button type="submit" [disabled]="deployForm.invalid || deploying()">Deploy server</button>
           </footer>
-          @if (deployLog().length) {
-            <pre class="settings-log">{{ deployLog().join('\\n') }}</pre>
-          }
         </form>
+      </section>
+    }
+
+    @if (deploying() || deployLog().length) {
+      <section class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Server install progress">
+        <div class="modal-panel deploy-progress-modal">
+          <header>
+            <h2>{{ deployProgress().title }}</h2>
+            @if (!deploying()) {
+              <button type="button" class="icon-button" aria-label="Close install progress" (click)="dismissDeployProgress()">x</button>
+            }
+          </header>
+          <div class="loading-summary">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <div>
+              <strong>{{ deployProgress().step }}</strong>
+              <p class="muted">{{ deployProgress().detail }}</p>
+            </div>
+          </div>
+          <div class="progress-track" [class.indeterminate]="deployProgress().percent === null">
+            @if (deployProgress().percent !== null) {
+              <span [style.width.%]="deployProgress().percent"></span>
+            } @else {
+              <span></span>
+            }
+          </div>
+          @if (deployProgress().percent !== null) {
+            <p class="muted progress-percent">{{ deployProgress().percent }}%</p>
+          }
+          @if (deployProgress().failed) {
+            <p class="error-text">{{ deployError() }}</p>
+          }
+          <details class="deploy-details">
+            <summary>View details</summary>
+            <pre>{{ deployProgress().log.join('\\n') }}</pre>
+          </details>
+        </div>
       </section>
     }
 
@@ -426,6 +461,7 @@ export class SettingsPage {
   readonly message = signal('');
   readonly deploying = signal(false);
   readonly deployLog = signal<string[]>([]);
+  readonly deployError = signal('');
   readonly importDetecting = signal(false);
   readonly importPreview = signal<ServerImportPreview | null>(null);
   readonly nexusState = signal<NexusConnectionState | null>(null);
@@ -517,6 +553,7 @@ export class SettingsPage {
   }
 
   closeModal(): void {
+    if (this.deploying()) return;
     this.modal.set(null);
     if (this.deployTimer) {
       window.clearInterval(this.deployTimer);
@@ -532,6 +569,7 @@ export class SettingsPage {
   deployServer(): void {
     const raw = this.deployForm.getRawValue();
     this.deploying.set(true);
+    this.deployError.set('');
     this.deployLog.set(['Sending deployment request to Palwarden...']);
     void this.serversService
       .deploy({
@@ -555,7 +593,9 @@ export class SettingsPage {
       .then((job) => this.watchDeployJob(job))
       .catch((error: unknown) => {
         this.deploying.set(false);
-        this.deployLog.set([error instanceof Error ? error.message : 'Could not start deployment.']);
+        const message = error instanceof Error ? error.message : 'Could not start deployment.';
+        this.deployError.set(message);
+        this.deployLog.set([...this.deployLog(), message]);
       });
   }
 
@@ -838,11 +878,14 @@ export class SettingsPage {
         if (status.status === 'done') {
           this.deploying.set(false);
           this.message.set('Server deployed.');
+          this.deployError.set('');
+          this.deployLog.set(status.log);
           this.closeModal();
           this.refreshServers();
         }
         if (status.status === 'error') {
           this.deploying.set(false);
+          this.deployError.set(status.error ?? 'Deployment failed.');
           this.deployLog.set([...status.log, status.error ?? 'Deployment failed.']);
           if (this.deployTimer) {
             window.clearInterval(this.deployTimer);
@@ -850,5 +893,15 @@ export class SettingsPage {
         }
       });
     }, 1500);
+  }
+
+  deployProgress() {
+    return deployProgressView(this.deployLog(), this.deployError() ? 'error' : this.deploying() ? 'running' : 'done', this.deployError() || null);
+  }
+
+  dismissDeployProgress(): void {
+    if (this.deploying()) return;
+    this.deployLog.set([]);
+    this.deployError.set('');
   }
 }

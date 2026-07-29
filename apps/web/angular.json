@@ -15,6 +15,11 @@
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
             "assets": [{ "glob": "**/*", "input": "src/assets", "output": "assets" }],
+            "optimization": {
+              "styles": {
+                "inlineCritical": false
+              }
+            },
             "styles": ["src/styles.css"]
           }
         },

@@ -16,8 +16,9 @@ Palwarden is a self-hosted Palworld Dedicated Server Controller for Windows 11 h
 
 ## Windows Desktop Package
 
-The preferred Windows package is the Electron desktop app. It opens Palwarden in
-a native window, starts the bundled backend, generates the master key on first
+The preferred Windows package is the Electron desktop installer. It installs a
+native Palwarden app with Start Menu and desktop shortcuts, opens Palwarden in a
+native window, starts the bundled backend, generates the master key on first
 launch, runs migrations, and keeps the browser-based UI available from the same
 backend when network access is enabled in Settings.
 
@@ -30,7 +31,7 @@ pnpm package:electron
 The build creates:
 
 ```text
-dist/electron/Palwarden 0.1.0.exe
+dist/electron/Palwarden-0.1.0-windows-x64-installer.exe
 ```
 
 The Electron app stores its runtime data under the app user-data folder and uses
@@ -38,6 +39,9 @@ the same `palwarden.env` format as the ZIP wrapper. The first launch generates a
 base64 32-byte `PALWARDEN_MASTER_KEY`; the setup page only asks for the owner
 username and password during normal local setup. The optional setup token field
 is only for creating the first owner from another device.
+
+The current installer is unsigned, so Windows SmartScreen may warn on first run
+until a code-signing certificate is added.
 
 ## Windows ZIP Package
 
@@ -70,8 +74,8 @@ base64 32-byte `PALWARDEN_MASTER_KEY`, writes `palwarden.env`, runs Prisma
 migrations, and serves the Angular UI and backend from
 `http://127.0.0.1:3333`.
 
-Electron is the main desktop-app path. A signed MSI/EXE installer, tray icon,
-custom app icon, and optional Windows service mode are planned follow-up work.
+Electron is the main desktop-app path. Code signing, a tray icon, and optional
+Windows service mode are planned follow-up work.
 
 ## Development Setup
 
@@ -191,6 +195,14 @@ Official Palworld REST API documentation is the source of truth for server API b
 - Windows startup registration and global start-servers-on-launch policy.
 - Settings page completion for user access, server instance management, file paths, and automation.
 - Backup UI polish, restore progress, and clearer recovery messaging.
+- New server install UI should use a modal loading/progress experience instead of plain SteamCMD output at the bottom of the page.
+- Fix mod thumbnails in both Electron and browser access.
+- Hide Windows console windows for launched server/update/helper processes where possible.
+- Correct dashboard installed-mod counts from Palwarden's local inventory.
+- Fix CPU usage sampling when the server is active.
+- Make copy-worthy app text selectable, including paths, URLs, settings, logs, errors, and diagnostics.
+- Investigate metric differences between Electron and browser dashboards.
+- Add playit.gg settings to the Server Control Player Connection card for guided tunnel setup.
 - Signed MSI/EXE installer, tray icon, custom app icon, Windows service mode, and uninstall entry.
 
 ## Todo: Waiting On Palworld API Support

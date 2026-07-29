@@ -112,6 +112,28 @@ export interface ServerConfigEntry {
   popular: boolean;
 }
 
+export interface ServerNetworkSettingsPayload {
+  restApiHost: string;
+  restApiPort: number;
+  gamePort: number;
+  queryPort: number;
+}
+
+export interface PlayerConnectionInfo {
+  gamePort: number;
+  queryPort: number;
+  publicListing: boolean | null;
+  addresses: Array<{
+    label: string;
+    host: string;
+    port: number;
+    address: string;
+    kind: 'lan' | 'tailscale' | 'public';
+    note: string;
+  }>;
+  notes: string[];
+}
+
 export interface BackupRecordView {
   id: string;
   serverInstanceId: string;
@@ -198,6 +220,14 @@ export class ServerInstancesService {
 
   update(id: string, payload: ServerPayload) {
     return this.http.put<ServerInstanceView>(`/api/server-instances/${id}`, payload);
+  }
+
+  updateNetworkSettings(id: string, payload: ServerNetworkSettingsPayload) {
+    return this.http.put<ServerInstanceView>(`/api/server-instances/${id}/network`, payload);
+  }
+
+  playerConnection(id: string) {
+    return this.http.get<PlayerConnectionInfo>(`/api/server-instances/${id}/player-connection`);
   }
 
   remove(id: string) {

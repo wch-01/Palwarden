@@ -5,6 +5,7 @@ import { SessionGuard } from '../../auth/guards/session.guard';
 import { Roles, RolesGuard } from '../../auth/guards/roles.guard';
 import type { RequestUser } from '../../auth/services/auth.service';
 import { ServerInstancesService } from '../services/server-instances.service';
+import type { ServerNetworkSettingsView } from '../services/server-instances.service';
 import { DeployServerInstanceDto, UpsertServerInstanceDto } from '../dto/server-instance.dto';
 import { ProcessManagerService } from '../../process-manager/services/process-manager.service';
 import { BackupsService } from '../../backups/backups.service';
@@ -103,6 +104,17 @@ export class ServerInstancesController {
   @Get(':id')
   get(@Param('id') id: string) {
     return this.instances.get(id);
+  }
+
+  @Roles('ADMIN', 'OWNER')
+  @Put(':id/network')
+  updateNetworkSettings(@Param('id') id: string, @Body() body: ServerNetworkSettingsView, @Req() req: Request & { user: RequestUser }) {
+    return this.instances.updateNetworkSettings(id, body, req.user.id);
+  }
+
+  @Get(':id/player-connection')
+  playerConnection(@Param('id') id: string) {
+    return this.instances.playerConnection(id);
   }
 
   @Roles('ADMIN', 'OWNER')

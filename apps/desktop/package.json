@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src/**/*.ts",
     "test": "node -e \"console.log('No desktop tests yet')\"",
-    "dist:win": "electron-builder --win portable --x64"
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {},
   "devDependencies": {
@@ -24,6 +24,7 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "extraResources": [
@@ -33,9 +34,22 @@
       }
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-windows-x64-installer.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Palwarden",
+      "deleteAppDataOnUninstall": false
     }
   }
 }

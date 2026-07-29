@@ -37,6 +37,14 @@ These items can be implemented with Palwarden's own database, Windows host capab
 - Graceful-stop timeout policy with optional force-stop escalation.
 - User access management UI for Palwarden accounts and global roles.
 - Settings page completion for server instance paths, file browsing, and automation.
+- Replace the deploy-new server plain SteamCMD text output with a modal loading/progress experience.
+- Fix Nexus/mod thumbnail rendering in Electron and same-origin web access.
+- Hide Windows console windows for Palworld server, SteamCMD, and helper process launches where possible.
+- Correct dashboard installed-mod counts against Palwarden's local mod inventory.
+- Fix host CPU usage sampling so active Palworld processes do not remain stuck at 0%.
+- Make app text selectable where users need to copy paths, URLs, settings, logs, errors, and diagnostics.
+- Investigate and normalize dashboard metric polling differences between the Electron window and browser web UI.
+- Add playit.gg settings to the Server Control Player Connection card for guided tunnel setup.
 - Basic filesystem-based mod inventory and installed mod count.
 - Signed MSI/EXE installer, tray icon, custom app icon, Windows service mode, and uninstall entry.
 - Linux process adapter after Windows behavior is stable.

@@ -8,6 +8,8 @@ coverage/
 *.db-journal
 /data/
 /logs/
+apps/api/logs/
+dev-palwarden.log
 .palwarden-data/
 .palwarden-dev.*
 .reference/

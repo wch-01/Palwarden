@@ -40,6 +40,7 @@ function createWindow(): void {
     minWidth: 1100,
     minHeight: 700,
     title: 'Palwarden',
+    icon: appIconPath(),
     backgroundColor: '#f8fafc',
     autoHideMenuBar: true,
     webPreferences: {
@@ -105,6 +106,10 @@ function runtimePath(): string {
     return join(app.getAppPath(), '..', '..', 'dist', 'windows', 'Palwarden');
   }
   return join(process.resourcesPath, 'palwarden-runtime');
+}
+
+function appIconPath(): string {
+  return join(app.getAppPath(), 'assets', 'icon.ico');
 }
 
 function sleep(ms: number): Promise<void> {

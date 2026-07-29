@@ -1,11 +1,11 @@
 import { Component, inject, signal } from '@angular/core';
 import type { OnDestroy } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { IonButton, IonInput, IonItem, IonTextarea, IonToast } from '@ionic/angular/standalone';
 import type { ServerDashboardCard } from '@palwarden/shared';
 import { ServerInstancesService } from './server-instances.service';
-import type { BackupRecordView, DeployJob, ServerUpdateAvailability } from './server-instances.service';
+import type { BackupRecordView, DeployJob, PlayerConnectionInfo, ServerUpdateAvailability } from './server-instances.service';
 import { selectServerFromRoute } from './selected-server';
 
 @Component({
@@ -44,6 +44,51 @@ import { selectServerFromRoute } from './selected-server';
             <ion-button fill="outline" (click)="restart()">Restart</ion-button>
             <ion-button fill="outline" (click)="saveWorld()">Save World</ion-button>
           </div>
+        </article>
+
+        <article class="panel connection-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Player Connection</h2>
+              <p class="muted">Share the right address for LAN, Tailscale, or public internet play. Ports are per server.</p>
+            </div>
+            @if (networkDirty()) {
+              <span class="state-badge danger">restart needed</span>
+            }
+          </div>
+          <div class="connection-address-grid">
+            @for (address of connectionInfo()?.addresses ?? []; track address.kind + address.address) {
+              <div class="connection-address-card">
+                <span>{{ address.label }}</span>
+                <strong>{{ address.address }}</strong>
+                <small>{{ address.note }}</small>
+              </div>
+            }
+          </div>
+          <div class="stat-grid connection-state-grid">
+            <div><span>Public Listing</span><strong>{{ publicListingText() }}</strong></div>
+            <div><span>Game Port</span><strong>{{ item.gamePort }}</strong></div>
+            <div><span>Query Port</span><strong>{{ item.queryPort }}</strong></div>
+            <div><span>REST API</span><strong>{{ item.restApiHost }}:{{ item.restApiPort }}</strong></div>
+          </div>
+          <form [formGroup]="networkForm" (ngSubmit)="saveNetworkSettings()">
+            <div class="modal-grid">
+              <label>REST host<input formControlName="restApiHost" /></label>
+              <label>REST API port<input type="number" formControlName="restApiPort" /></label>
+              <label>Game port<input type="number" formControlName="gamePort" /></label>
+              <label>Query port<input type="number" formControlName="queryPort" /></label>
+            </div>
+            <footer class="panel-footer">
+              <span class="muted">Use unique ports for each server on this host.</span>
+              <ion-button type="submit" [disabled]="networkForm.invalid || networkSaving()">Save Ports</ion-button>
+            </footer>
+          </form>
+          <details class="connection-notes">
+            <summary>Connection notes</summary>
+            @for (note of connectionInfo()?.notes ?? []; track note) {
+              <p>{{ note }}</p>
+            }
+          </details>
         </article>
 
         <article class="panel maintenance-panel">
@@ -246,6 +291,7 @@ export class ServerControlPage implements OnDestroy {
   readonly backupBusy = signal(false);
   readonly maintenanceJob = signal<DeployJob | null>(null);
   readonly updateAvailability = signal<ServerUpdateAvailability | null>(null);
+  readonly connectionInfo = signal<PlayerConnectionInfo | null>(null);
   readonly updateModalOpen = signal(false);
   readonly restoreCandidate = signal<BackupRecordView | null>(null);
   readonly broadcastForm = this.fb.nonNullable.group({ message: [''] });
@@ -254,11 +300,20 @@ export class ServerControlPage implements OnDestroy {
     shutdownWaitSeconds: [60],
     broadcastMessage: ['Palwarden is updating this server. Please reconnect after maintenance is complete.'],
   });
+  readonly networkForm = this.fb.nonNullable.group({
+    restApiHost: ['127.0.0.1', Validators.required],
+    restApiPort: [8212, [Validators.required, Validators.min(1), Validators.max(65535)]],
+    gamePort: [8211, [Validators.required, Validators.min(1), Validators.max(65535)]],
+    queryPort: [27015, [Validators.required, Validators.min(1), Validators.max(65535)]],
+  });
+  readonly networkSaving = signal(false);
+  private networkLoadedFor: string | null = null;
   private readonly refreshTimer = window.setInterval(() => this.refresh(), 3000);
   private updatePollTimer: number | null = null;
   private actionPollTimer: number | null = null;
   private backupsLoadedFor: string | null = null;
   private updateAvailabilityLoadedFor: string | null = null;
+  private connectionLoadedFor: string | null = null;
 
   constructor() {
     this.refresh(true);
@@ -274,13 +329,54 @@ export class ServerControlPage implements OnDestroy {
     this.service.dashboard().subscribe((servers) => {
       const selected = selectServerFromRoute(servers, this.route, this.router);
       this.server.set(selected);
+      if (selected && selected.id !== this.networkLoadedFor) {
+        this.patchNetworkForm(selected);
+      }
       if (selected && (loadBackups || selected.id !== this.backupsLoadedFor)) {
         this.loadBackups(selected.id);
       }
       if (selected && selected.id !== this.updateAvailabilityLoadedFor) {
         this.loadUpdateAvailability(selected.id);
       }
+      if (selected && selected.id !== this.connectionLoadedFor) {
+        this.loadPlayerConnection(selected.id);
+      }
     });
+  }
+
+  saveNetworkSettings(): void {
+    const server = this.server();
+    if (!server || this.networkForm.invalid || this.networkSaving()) return;
+    const raw = this.networkForm.getRawValue();
+    if (new Set([raw.restApiPort, raw.gamePort, raw.queryPort]).size !== 3) {
+      this.showToast('REST API, game, and query ports must be different.', 'danger');
+      return;
+    }
+    this.networkSaving.set(true);
+    this.service.updateNetworkSettings(server.id, raw).subscribe({
+      next: () => {
+        this.networkSaving.set(false);
+        this.networkForm.markAsPristine();
+        this.showToast('Network ports saved. Restart the server for changes to apply.');
+        this.loadPlayerConnection(server.id);
+        this.refresh();
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.networkSaving.set(false);
+        this.showToast(error.error?.message ?? 'Could not save network ports.', 'danger');
+      },
+    });
+  }
+
+  networkDirty(): boolean {
+    return this.networkForm.dirty;
+  }
+
+  publicListingText(): string {
+    const value = this.connectionInfo()?.publicListing;
+    if (value === true) return 'enabled';
+    if (value === false) return 'disabled';
+    return 'unknown';
   }
 
   start(): void {
@@ -606,6 +702,16 @@ export class ServerControlPage implements OnDestroy {
     this.actionBusy.set(false);
   }
 
+  private patchNetworkForm(server: ServerDashboardCard): void {
+    this.networkLoadedFor = server.id;
+    this.networkForm.reset({
+      restApiHost: server.restApiHost,
+      restApiPort: server.restApiPort,
+      gamePort: server.gamePort,
+      queryPort: server.queryPort,
+    });
+  }
+
   loadBackups(id: string): void {
     this.service.backups(id).subscribe((records) => {
       this.backupsLoadedFor = id;
@@ -618,6 +724,14 @@ export class ServerControlPage implements OnDestroy {
     this.service.updateAvailability(id).subscribe({
       next: (availability) => this.updateAvailability.set(availability),
       error: () => this.updateAvailability.set(null),
+    });
+  }
+
+  loadPlayerConnection(id: string): void {
+    this.connectionLoadedFor = id;
+    this.service.playerConnection(id).subscribe({
+      next: (info) => this.connectionInfo.set(info),
+      error: () => this.connectionInfo.set(null),
     });
   }
 

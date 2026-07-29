@@ -21,7 +21,7 @@ function Invoke-Native {
 
 Push-Location $repo
 try {
-  Invoke-Native pnpm.cmd install --frozen-lockfile
+  Invoke-Native pnpm.cmd install --frozen-lockfile --config.confirmModulesPurge=false
   Invoke-Native pnpm.cmd build
 
   if (Test-Path $staging) {
@@ -42,6 +42,7 @@ try {
   Invoke-Native pnpm.cmd --filter @palwarden/api deploy --prod --legacy --config.node-linker=hoisted $apiStage
   Copy-Item (Join-Path $repo 'apps\api\dist') (Join-Path $apiStage 'dist') -Recurse -Force
   Copy-Item (Join-Path $repo 'apps\api\prisma') (Join-Path $apiStage 'prisma') -Recurse -Force
+  Remove-Item (Join-Path $apiStage 'prisma\palwarden.db*') -Force -ErrorAction SilentlyContinue
   Push-Location $apiStage
   try {
     Invoke-Native node node_modules\prisma\build\index.js generate --schema prisma\schema.prisma

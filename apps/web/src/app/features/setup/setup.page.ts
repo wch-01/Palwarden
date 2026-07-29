@@ -12,9 +12,13 @@ import { AuthService } from '../../core/authentication/auth.service';
     <main class="auth-page">
       <section class="auth-panel">
         <div class="auth-copy">
-          <img class="auth-logo" src="assets/brand/palwarden-logo.png" alt="Palwarden" />
-          <p class="eyebrow">Palwarden</p>
-          <h1>Set up your owner account</h1>
+          <div class="auth-brand">
+            <img class="auth-logo" src="assets/brand/palwarden-logo.png" alt="" />
+            <div>
+              <p class="eyebrow">Palwarden</p>
+              <h1>Set up your owner account</h1>
+            </div>
+          </div>
           <p class="lede">Create the first Palwarden account for this machine.</p>
         </div>
         <form [formGroup]="form" (ngSubmit)="submit()" class="auth-form">

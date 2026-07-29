@@ -14,9 +14,18 @@ function Invoke-Native {
 
 Push-Location $repo
 try {
+  $env:CI = 'true'
+  $env:npm_config_confirm_modules_purge = 'false'
+  $env:PNPM_CONFIG_CONFIRM_MODULES_PURGE = 'false'
+  $electronOutput = Join-Path $repo 'dist\electron'
+  if (Test-Path $electronOutput) {
+    Remove-Item $electronOutput -Recurse -Force
+  }
   Invoke-Native powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -NodeVersion $NodeVersion
   Invoke-Native pnpm.cmd --filter @palwarden/desktop build
   Invoke-Native pnpm.cmd --filter @palwarden/desktop dist:win
+  Write-Host "Electron installer output:"
+  Get-ChildItem $electronOutput -Filter '*installer.exe' | Select-Object -ExpandProperty FullName
 } finally {
   Pop-Location
 }

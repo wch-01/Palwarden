@@ -18,7 +18,7 @@ import type {
 import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { access, constants, cp, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { basename, extname, parse as parsePath, isAbsolute, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -53,6 +53,30 @@ export interface ServerUpdateAvailabilityView {
 
 export interface ServerConfigView {
   entries: Awaited<ReturnType<PalworldSettingsFileService['readConfigEntries']>>;
+}
+
+export interface ServerNetworkSettingsView {
+  restApiHost: string;
+  restApiPort: number;
+  gamePort: number;
+  queryPort: number;
+}
+
+export interface PlayerConnectionAddressView {
+  label: string;
+  host: string;
+  port: number;
+  address: string;
+  kind: 'lan' | 'tailscale' | 'public';
+  note: string;
+}
+
+export interface PlayerConnectionView {
+  gamePort: number;
+  queryPort: number;
+  publicListing: boolean | null;
+  addresses: PlayerConnectionAddressView[];
+  notes: string[];
 }
 
 interface NexusArchiveInstallResult {
@@ -123,8 +147,11 @@ export class ServerInstancesService {
     const instances = await this.prisma.serverInstance.findMany({ orderBy: { displayName: 'asc' } });
     return Promise.all(
       instances.map(async (instance) => {
-        const runtime = await this.processManager.getRecoveredStatus(instance);
-        const disk = await this.diskTelemetry(instance);
+        const [runtime, disk, installedModCount] = await Promise.all([
+          this.processManager.getRecoveredStatus(instance),
+          this.diskTelemetry(instance),
+          this.localInstalledModCount(instance),
+        ]);
         try {
           const client = this.palworld.forInstance(instance, this.decryptPassword(instance));
           const [info, metrics] = await Promise.all([client.info(), client.metrics()]);
@@ -143,6 +170,7 @@ export class ServerInstancesService {
             processCpuPeakPercent: runtime.processCpuPeakPercent ?? null,
             processPrivateMemoryMb: runtime.processPrivateMemoryMb ?? null,
             processPeakMemoryMb: runtime.processPeakMemoryMb ?? null,
+            installedModCount,
             ...disk,
           };
         } catch {
@@ -162,6 +190,7 @@ export class ServerInstancesService {
             processCpuPeakPercent: runtime.processCpuPeakPercent ?? null,
             processPrivateMemoryMb: runtime.processPrivateMemoryMb ?? null,
             processPeakMemoryMb: runtime.processPeakMemoryMb ?? null,
+            installedModCount,
             ...disk,
           };
         }
@@ -277,7 +306,7 @@ export class ServerInstancesService {
       name: dto.name,
       author: dto.author,
       summary: dto.summary ?? '',
-      pictureUrl: dto.pictureUrl ?? null,
+      pictureUrl: this.normalizeExternalImageUrl(dto.pictureUrl ?? null),
       requestedByUserId: actorId,
     };
     if (pending) {
@@ -461,6 +490,55 @@ export class ServerInstancesService {
     return this.toView(instance);
   }
 
+  async updateNetworkSettings(id: string, dto: ServerNetworkSettingsView, actorId: string): Promise<ServerInstanceView> {
+    const existing = await this.getRaw(id);
+    this.validateDistinctPorts(dto.restApiPort, dto.gamePort, dto.queryPort);
+    await this.validateNoConflicts(
+      {
+        installationDirectory: existing.installationDirectory,
+        restApiPort: dto.restApiPort,
+        gamePort: dto.gamePort,
+        queryPort: dto.queryPort,
+      },
+      id,
+    );
+    await this.settingsFile.updateConfigEntries(existing.configurationFilePath, {
+      PublicPort: dto.gamePort,
+      QueryPort: dto.queryPort,
+      RESTAPIEnabled: true,
+      RESTAPIPort: dto.restApiPort,
+    });
+    const instance = await this.prisma.serverInstance.update({
+      where: { id },
+      data: {
+        restApiHost: dto.restApiHost,
+        restApiPort: dto.restApiPort,
+        gamePort: dto.gamePort,
+        queryPort: dto.queryPort,
+        updatedAt: new Date(),
+      },
+    });
+    await this.audit.record({ actorId, action: 'SERVER_UPDATED', targetId: id, message: 'Server network ports updated.' });
+    return this.toView(instance);
+  }
+
+  async playerConnection(id: string): Promise<PlayerConnectionView> {
+    const instance = await this.getRaw(id);
+    const publicListing = await this.readPublicListing(instance);
+    const addresses = this.localPlayerAddresses(instance.gamePort);
+    return {
+      gamePort: instance.gamePort,
+      queryPort: instance.queryPort,
+      publicListing,
+      addresses,
+      notes: [
+        'Public listing only advertises the server. It does not create a tunnel or automatically open router/firewall ports.',
+        'For public internet play, allow the game and query ports through Windows Firewall and forward them on the router.',
+        'For Tailscale play, players must be on the tailnet or have the machine shared with them, then connect to the Tailscale address.',
+      ],
+    };
+  }
+
   async remove(id: string, actorId: string): Promise<void> {
     await this.getRaw(id);
     await this.processManager.assertStopped(id);
@@ -530,6 +608,69 @@ export class ServerInstancesService {
       items,
       warnings,
     };
+  }
+
+  private async localInstalledModCount(instance: ServerInstance): Promise<number | null> {
+    try {
+      const pakRoot = join(instance.installationDirectory, 'Pal', 'Content', 'Paks');
+      const pakModsRoot = join(pakRoot, '~mods');
+      const logicRoot = join(pakRoot, 'LogicMods');
+      const ue4ssRoot = join(instance.installationDirectory, 'Pal', 'Binaries', 'Win64', 'Mods');
+      const ue4ssInstall = await this.prisma.ue4ssInstall.findUnique({ where: { serverInstanceId: instance.id } });
+      const ignoredUe4ssFolders = this.ue4ssLoaderModFolders(ue4ssInstall?.managedPathsJson);
+      const [pakItems, logicItems, ue4ssItems, disabledItems] = await Promise.all([
+        this.scanPakMods(instance.installationDirectory, pakRoot, pakModsRoot),
+        this.scanLogicMods(instance.installationDirectory, logicRoot),
+        this.scanUe4ssMods(instance.installationDirectory, ue4ssRoot, ignoredUe4ssFolders),
+        this.prisma.managedMod.count({ where: { serverInstanceId: instance.id, status: 'disabled' } }),
+      ]);
+      const keys = new Set([...pakItems, ...logicItems, ...ue4ssItems].map((item) => item.sourceKey));
+      return keys.size + disabledItems;
+    } catch {
+      return null;
+    }
+  }
+
+  private async readPublicListing(instance: ServerInstance): Promise<boolean | null> {
+    const entries = await this.settingsFile.readConfigEntries(instance.configurationFilePath).catch(() => []);
+    const publicEntry = entries.find((entry) => entry.key === 'bIsPublic');
+    return typeof publicEntry?.value === 'boolean' ? publicEntry.value : null;
+  }
+
+  private localPlayerAddresses(gamePort: number): PlayerConnectionAddressView[] {
+    const addresses: PlayerConnectionAddressView[] = [];
+    for (const [name, entries] of Object.entries(networkInterfaces())) {
+      for (const entry of entries ?? []) {
+        if (entry.family !== 'IPv4' || entry.internal || !entry.address) continue;
+        const kind = this.isTailscaleAddress(entry.address) ? 'tailscale' : 'lan';
+        addresses.push({
+          label: kind === 'tailscale' ? `Tailscale (${name})` : `LAN (${name})`,
+          host: entry.address,
+          port: gamePort,
+          address: `${entry.address}:${gamePort}`,
+          kind,
+          note:
+            kind === 'tailscale'
+              ? 'Share this with players who can reach this machine through Tailscale.'
+              : 'Share this with players on the same local network.',
+        });
+      }
+    }
+    addresses.push({
+      label: 'Public Internet',
+      host: '<public-ip-or-dns>',
+      port: gamePort,
+      address: `<public-ip-or-dns>:${gamePort}`,
+      kind: 'public',
+      note: 'Replace with your WAN IP or DNS name after firewall and router forwarding are configured.',
+    });
+    return addresses;
+  }
+
+  private isTailscaleAddress(address: string): boolean {
+    const parts = address.split('.').map((part) => Number(part));
+    const [first, second] = parts;
+    return first === 100 && second !== undefined && second >= 64 && second <= 127;
   }
 
   async enableMod(id: string, modId: string, actorId: string): Promise<ServerModInventory> {
@@ -1599,7 +1740,7 @@ export class ServerInstancesService {
       categoryName: this.stringField(item, 'category') || 'Uncategorized',
       downloads: this.numberField(item, 'downloads') ?? 0,
       endorsements: this.numberField(item, 'endorsements') ?? 0,
-      pictureUrl: this.stringField(item, 'pictureUrl'),
+      pictureUrl: this.normalizeExternalImageUrl(this.stringField(item, 'pictureUrl')),
       directDownloadEnabled: this.booleanField(item, 'directDownloadEnabled'),
       nexusUrl: `https://www.nexusmods.com/palworld/mods/${modId}`,
     };
@@ -2027,6 +2168,15 @@ export class ServerInstancesService {
     return typeof field === 'string' ? field : null;
   }
 
+  private normalizeExternalImageUrl(value: string | null): string | null {
+    if (!value?.trim()) return null;
+    const trimmed = value.trim();
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('http://')) return `https://${trimmed.slice('http://'.length)}`;
+    if (trimmed.startsWith('https://')) return trimmed;
+    return null;
+  }
+
   private numberField(value: unknown, key: string): number | null {
     const field = this.asRecord(value)[key];
     return typeof field === 'number' ? field : null;
@@ -2049,7 +2199,7 @@ export class ServerInstancesService {
       name: request.name,
       author: request.author,
       summary: request.summary,
-      pictureUrl: request.pictureUrl,
+      pictureUrl: this.normalizeExternalImageUrl(request.pictureUrl),
       nexusUrl: `https://www.nexusmods.com/palworld/mods/${request.nexusModId}`,
       requestedBy: request.requestedByUserId,
       requestedByUsername: request.requestedBy?.username ?? null,
@@ -2355,6 +2505,9 @@ export class ServerInstancesService {
   private appendDeployLog(jobId: string, line: string): void {
     const job = this.deployJobs.get(jobId);
     if (!job) {
+      return;
+    }
+    if (/type\s+'quit'\s+to\s+exit/i.test(line)) {
       return;
     }
     job.log.push(line);

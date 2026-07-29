@@ -17,7 +17,15 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   app.setGlobalPrefix('api');
   app.use(cookieParser());
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          "img-src": ["'self'", 'data:', 'blob:', 'https:'],
+        },
+      },
+    }),
+  );
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (req.url.includes('/server-instances/deploy')) {
       console.log(`[deploy-request] ${req.method} ${req.url}`);
@@ -62,10 +70,14 @@ function serveProductionWebApp(app: NestExpressApplication): void {
   const webRoot = process.env.PALWARDEN_WEB_DIST || firstExistingPath([join(process.cwd(), 'web'), join(process.cwd(), 'apps', 'web', 'dist', 'browser')]);
   if (!webRoot || !existsSync(join(webRoot, 'index.html'))) return;
 
-  app.useStaticAssets(webRoot);
+  app.useStaticAssets(webRoot, { index: false });
   app.getHttpAdapter()
     .getInstance()
-    .get(/^\/(?!api(?:\/|$)).*/, (_req: Request, res: Response) => {
+    .use((req: Request, res: Response, next: NextFunction) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api')) {
+        next();
+        return;
+      }
       res.sendFile(join(webRoot, 'index.html'));
     });
 }

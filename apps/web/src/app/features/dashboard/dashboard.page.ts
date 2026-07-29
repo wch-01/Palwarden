@@ -29,7 +29,7 @@ import { selectServerFromRoute } from '../server-instances/selected-server';
         <div><span>Private RAM</span><strong>{{ formatMemory(item.processPrivateMemoryMb) }}</strong></div>
         <div><span>Save Size</span><strong>{{ formatMemory(item.saveDirectorySizeMb) }}</strong></div>
         <div><span>Drive Free</span><strong>{{ formatMemory(item.driveFreeSpaceMb) }}</strong></div>
-        <div><span>Installed Mods</span><strong>0</strong></div>
+        <div><span>Installed Mods</span><strong>{{ item.installedModCount ?? 'unknown' }}</strong></div>
         <div><span>Uptime</span><strong>{{ formatUptime(item.uptimeSeconds) }}</strong></div>
       </section>
 
