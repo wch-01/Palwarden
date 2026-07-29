@@ -33,7 +33,13 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
   template: `
     <div class="shell">
       <nav class="sidebar">
-        <h1>Palwarden</h1>
+        <div class="brand-lockup">
+          <img src="assets/brand/palwarden-logo.png" alt="" />
+          <div>
+            <h1>Palwarden</h1>
+            <span>Server Controller</span>
+          </div>
+        </div>
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a routerLink="/server-control" routerLinkActive="active">Server Control</a>
         <a routerLink="/server-configuration" routerLinkActive="active">Server Configuration</a>
@@ -48,8 +54,11 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
       <main class="app-main">
         <header class="topbar">
           <section class="page-heading">
-            <h1>{{ pageTitle() }}</h1>
-            <p>{{ pageDescription() }}</p>
+            <img src="assets/brand/palwarden-logo.png" alt="" />
+            <div>
+              <h1>{{ pageTitle() }}</h1>
+              <p>{{ pageDescription() }}</p>
+            </div>
           </section>
           <section class="topbar-status" aria-label="Server summary">
             <label class="server-picker">

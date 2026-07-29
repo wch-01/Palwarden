@@ -12,6 +12,7 @@ import { AuthService } from '../../core/authentication/auth.service';
     <main class="auth-page">
       <section class="auth-panel">
         <div class="auth-copy">
+          <img class="auth-logo" src="assets/brand/palwarden-logo.png" alt="Palwarden" />
           <p class="eyebrow">Palwarden</p>
           <h1>Set up your owner account</h1>
           <p class="lede">Create the first Palwarden account for this machine.</p>
@@ -20,7 +21,11 @@ import { AuthService } from '../../core/authentication/auth.service';
           <ion-list>
             <ion-item><ion-input label="Owner username" formControlName="username" /></ion-item>
             <ion-item><ion-input label="Password" type="password" formControlName="password" /></ion-item>
-            <ion-item><ion-input label="Setup token" formControlName="setupToken" /></ion-item>
+            <details class="setup-token-panel">
+              <summary>Remote setup token</summary>
+              <p>Only needed when creating the first owner from another device.</p>
+              <ion-item><ion-input label="Setup token" formControlName="setupToken" /></ion-item>
+            </details>
           </ion-list>
           @if (error()) {
             <p class="error">{{ error() }}</p>

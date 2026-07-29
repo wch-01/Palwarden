@@ -217,6 +217,15 @@ export interface NexusConnectionState {
   updatedAt: string | null;
 }
 
+export interface HostNetworkSettings {
+  host: string;
+  port: number;
+  webAccessMode: 'localhost' | 'lan';
+  localUrl: string;
+  lanUrl: string | null;
+  restartRequired: boolean;
+}
+
 export interface SafePalworldError {
   code:
     | 'CONNECTION_REFUSED'

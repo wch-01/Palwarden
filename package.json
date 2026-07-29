@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @palwarden/api --filter @palwarden/web dev",
     "build": "pnpm -r build",
+    "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "package:electron": "powershell -ExecutionPolicy Bypass -File scripts/package-electron-windows.ps1",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "e2e": "playwright test",

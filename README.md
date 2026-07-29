@@ -12,8 +12,68 @@ Palwarden is a self-hosted Palworld Dedicated Server Controller for Windows 11 h
 - Prisma: `6.19.3`
 - Argon2: `0.44.0`
 - SQLite: local file database through Prisma
+- Electron: `39.8.10`
 
-## Setup
+## Windows Desktop Package
+
+The preferred Windows package is the Electron desktop app. It opens Palwarden in
+a native window, starts the bundled backend, generates the master key on first
+launch, runs migrations, and keeps the browser-based UI available from the same
+backend when network access is enabled in Settings.
+
+Build the Electron package from a development machine:
+
+```powershell
+pnpm package:electron
+```
+
+The build creates:
+
+```text
+dist/electron/Palwarden 0.1.0.exe
+```
+
+The Electron app stores its runtime data under the app user-data folder and uses
+the same `palwarden.env` format as the ZIP wrapper. The first launch generates a
+base64 32-byte `PALWARDEN_MASTER_KEY`; the setup page only asks for the owner
+username and password during normal local setup. The optional setup token field
+is only for creating the first owner from another device.
+
+## Windows ZIP Package
+
+The ZIP package remains available as a fallback and diagnostic-friendly wrapper.
+The end user does not need to install Node.js, pnpm, Prisma, or manually
+generate secrets.
+
+Build the package from a development machine:
+
+```powershell
+pnpm package:windows
+```
+
+The build creates:
+
+```text
+dist/windows/Palwarden-windows-x64.zip
+```
+
+On a new Windows 11 computer:
+
+1. Extract `Palwarden-windows-x64.zip`.
+2. Run `Install-Palwarden.cmd`.
+3. Use the created desktop shortcut or the browser window that opens.
+4. Create the first owner account on the setup screen.
+
+The installer copies Palwarden to `%LOCALAPPDATA%\Programs\Palwarden`.
+The first launch creates `%LOCALAPPDATA%\Palwarden\data`, generates a
+base64 32-byte `PALWARDEN_MASTER_KEY`, writes `palwarden.env`, runs Prisma
+migrations, and serves the Angular UI and backend from
+`http://127.0.0.1:3333`.
+
+Electron is the main desktop-app path. A signed MSI/EXE installer, tray icon,
+custom app icon, and optional Windows service mode are planned follow-up work.
+
+## Development Setup
 
 ```powershell
 pnpm install
@@ -62,12 +122,19 @@ Palworld AdminPasswords are encrypted with AES-256-GCM using `PALWARDEN_MASTER_K
 
 Palwarden binds to localhost by default. If you expose the admin panel beyond the host, use HTTPS through a reverse proxy or a secure private network. Do not expose Palworld REST API ports directly to the internet.
 
+Owners can switch Settings > Network Access from local-only to LAN mode. This
+writes the desired bind address to `palwarden.env`; restart Palwarden afterward
+for the backend to bind beyond localhost. Tailscale or another private VPN is
+recommended for remote access.
+
 ## Commands
 
 ```powershell
 pnpm build
 pnpm lint
 pnpm test
+pnpm package:windows
+pnpm package:electron
 pnpm db:deploy
 pnpm --filter @palwarden/api dev
 pnpm --filter @palwarden/web dev
@@ -97,6 +164,9 @@ pnpm exec playwright test
 - Host-level Nexus Mods API key storage, encrypted with `PALWARDEN_MASTER_KEY`.
 - Per-server local mod inventory with enable, disable, remove, and load-order actions for Pak, LogicMods, and UE4SS mod folders.
 - Audit log API and UI for administrative actions.
+- Windows package scripts with bundled Node runtime, generated master key, automatic migrations, and same-origin production hosting.
+- Electron desktop package with bundled Palwarden runtime.
+- Host Network Access setting for local-only vs LAN/Tailscale/private-network browser access.
 
 ## Known Limitations
 
@@ -104,8 +174,8 @@ pnpm exec playwright test
 - Manual backups can be created, restored, and deleted from Server Control. Scheduled backups are not implemented yet.
 - Process recovery after Palwarden restarts is only structurally prepared; robust process identity recovery is next.
 - The Windows adapter does not force-kill during normal graceful stop.
-- Settings sections for Windows startup, global start policy, automation, and user administration are still incomplete.
-- Nexus mod browsing, direct download, update checks, and admin approval workflows are not implemented yet.
+- Settings sections for Windows startup, global start policy, and automation are still incomplete.
+- Nexus mod browsing, direct download, update checks, and admin approval workflows are implemented as an initial working flow and need broader archive-shape testing.
 - Guild roster is a placeholder until Palworld exposes enough supported API data for it.
 
 ## Reference and License
@@ -121,8 +191,7 @@ Official Palworld REST API documentation is the source of truth for server API b
 - Windows startup registration and global start-servers-on-launch policy.
 - Settings page completion for user access, server instance management, file paths, and automation.
 - Backup UI polish, restore progress, and clearer recovery messaging.
-- Nexus mod browsing, direct install, update checks, and host approval workflow modeled after PW-Server-Manager.
-- Installer/package work for Windows.
+- Signed MSI/EXE installer, tray icon, custom app icon, Windows service mode, and uninstall entry.
 
 ## Todo: Waiting On Palworld API Support
 

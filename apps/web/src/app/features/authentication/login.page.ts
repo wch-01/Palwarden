@@ -12,6 +12,7 @@ import { AuthService } from '../../core/authentication/auth.service';
     <main class="auth-page">
       <section class="auth-panel">
         <div class="auth-copy">
+          <img class="auth-logo" src="assets/brand/palwarden-logo.png" alt="Palwarden" />
           <p class="eyebrow">Palwarden</p>
           <h1>Welcome back</h1>
           <p class="lede">Sign in to manage your Palworld server fleet.</p>

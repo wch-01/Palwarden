@@ -8,6 +8,8 @@ allowBuilds:
   '@prisma/engines': true
   '@scarf/scarf': true
   argon2: true
+  electron: true
+  electron-winstaller: true
   esbuild: true
   lmdb: true
   msgpackr-extract: true

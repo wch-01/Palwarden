@@ -7,6 +7,7 @@ import type {
   NexusModFile,
   NexusModSummary,
   ServerDashboardCard,
+  HostNetworkSettings,
   ServerImportPreview,
   ServerInstanceView,
   ServerLogResult,
@@ -165,6 +166,14 @@ export class ServerInstancesService {
 
   removeNexusApiKey() {
     return this.http.delete<NexusConnectionState>('/api/server-instances/nexus');
+  }
+
+  hostNetworkSettings() {
+    return this.http.get<HostNetworkSettings>('/api/settings/host/network');
+  }
+
+  saveHostNetworkSettings(payload: { webAccessMode: 'localhost' | 'lan'; port?: number; acknowledgeExposure?: boolean }) {
+    return this.http.put<HostNetworkSettings>('/api/settings/host/network', payload);
   }
 
   nexusMods(list: 'trending' | 'latest_added' | 'latest_updated', query = '') {

@@ -18,6 +18,9 @@ Palwarden currently supports the first usable Windows administration loop:
 - Manual backup records, backup creation, restore, delete, and failed-record cleanup.
 - Backup-before-restart, backup-before-update, and backup-before-configuration-change policies.
 - Audit log UI.
+- Windows ZIP installer package with bundled Node runtime, generated master key, automatic migrations, and same-origin production hosting.
+- Electron desktop package with bundled Palwarden runtime and native app window.
+- Host Network Access setting for local-only or LAN/private-network browser access.
 
 ## Can Build With Current APIs
 
@@ -35,7 +38,7 @@ These items can be implemented with Palwarden's own database, Windows host capab
 - User access management UI for Palwarden accounts and global roles.
 - Settings page completion for server instance paths, file browsing, and automation.
 - Basic filesystem-based mod inventory and installed mod count.
-- Windows installer or packaged executable.
+- Signed MSI/EXE installer, tray icon, custom app icon, Windows service mode, and uninstall entry.
 - Linux process adapter after Windows behavior is stable.
 
 ## Waiting On Palworld API Support

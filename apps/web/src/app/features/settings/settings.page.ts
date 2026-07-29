@@ -3,7 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/authentication/auth.service';
 import type { DeployJob, ServerPayload } from '../server-instances/server-instances.service';
 import { ServerInstancesService } from '../server-instances/server-instances.service';
-import type { NexusConnectionState, ServerDashboardCard, ServerImportPreview, UserRole } from '@palwarden/shared';
+import type { HostNetworkSettings, NexusConnectionState, ServerDashboardCard, ServerImportPreview, UserRole } from '@palwarden/shared';
 import { UsersClient } from './users.service';
 import type { ManagedUser } from './users.service';
 
@@ -263,33 +263,68 @@ import type { ManagedUser } from './users.service';
         <summary>
           <span>
             <strong>Network Access</strong>
-            <small>Review LAN binding, HTTPS, reverse proxy, and CORS guidance.</small>
+            <small>Choose whether Palwarden is local-only or reachable from other trusted machines.</small>
           </span>
-          <span class="state-badge">local first</span>
+          <span class="state-badge" [class.online]="hostNetwork()?.webAccessMode === 'lan'">
+            {{ hostNetwork()?.webAccessMode === 'lan' ? 'LAN enabled' : 'local only' }}
+          </span>
         </summary>
         <div class="settings-section-body">
-          <div class="settings-grid">
-            <article class="settings-card">
-              <h3>Default binding</h3>
-              <p class="muted">Palwarden should bind to localhost by default. Use LAN binding only on a trusted private network.</p>
-              <code>PALWARDEN_HOST=127.0.0.1</code>
-            </article>
-            <article class="settings-card">
-              <h3>LAN access</h3>
-              <p class="muted">For another trusted machine on your LAN, bind to a private interface and list explicit browser origins.</p>
-              <code>PALWARDEN_HOST=0.0.0.0</code>
-              <code>PALWARDEN_CORS_ORIGINS=http://trusted-host:4200</code>
-            </article>
-            <article class="settings-card">
-              <h3>Internet access</h3>
-              <p class="muted">Put Palwarden behind HTTPS with a reverse proxy or a secure private network. Do not expose Palworld REST API ports directly.</p>
-              <code>PALWARDEN_COOKIE_SECURE=true</code>
-            </article>
-            <article class="settings-card">
-              <h3>CORS rule</h3>
-              <p class="muted">Never use wildcard CORS with credentials. Same-origin frontend and backend communication is the production target.</p>
-            </article>
-          </div>
+          <form class="network-access-form" [formGroup]="networkForm" (ngSubmit)="saveNetworkSettings()">
+            <div class="network-mode-grid">
+              <label class="network-mode-card" [class.selected]="networkForm.controls.webAccessMode.value === 'localhost'">
+                <input type="radio" formControlName="webAccessMode" value="localhost" />
+                <span>
+                  <strong>Local desktop only</strong>
+                  <small>Bind Palwarden to this PC. Electron and the local browser use localhost.</small>
+                  <code>http://127.0.0.1:{{ networkForm.controls.port.value || 3333 }}</code>
+                </span>
+              </label>
+              <label class="network-mode-card" [class.selected]="networkForm.controls.webAccessMode.value === 'lan'">
+                <input type="radio" formControlName="webAccessMode" value="lan" />
+                <span>
+                  <strong>Expose web UI on this network</strong>
+                  <small>Bind Palwarden for access from another trusted browser, LAN IP, VPN, or Tailscale address.</small>
+                  <code>http://&lt;this-pc-ip&gt;:{{ networkForm.controls.port.value || 3333 }}</code>
+                </span>
+              </label>
+            </div>
+
+            <div class="network-settings-row">
+              <label>
+                Web UI port
+                <input type="number" formControlName="port" min="1" max="65535" />
+              </label>
+              <div class="settings-card compact-card">
+                <h3>Current target</h3>
+                <code>{{ hostNetwork()?.localUrl || 'http://127.0.0.1:3333' }}</code>
+                @if (hostNetwork()?.lanUrl) {
+                  <code>{{ hostNetwork()?.lanUrl }}</code>
+                }
+              </div>
+            </div>
+
+            @if (networkForm.controls.webAccessMode.value === 'lan') {
+              <label class="setting-toggle warning-toggle">
+                <input type="checkbox" formControlName="acknowledgeExposure" />
+                <span>I understand Palwarden will listen beyond localhost. I will use Windows Firewall, a private LAN, VPN/Tailscale, or HTTPS reverse proxy as appropriate.</span>
+              </label>
+            }
+
+            <div class="warning-panel network-warning-panel">
+              <strong>Public exposure is the host admin's choice.</strong>
+              <p>Palwarden only controls the bind address and port. For internet access, use HTTPS and a secure network path. Do not expose Palworld REST API ports directly.</p>
+            </div>
+
+            <footer class="settings-actions">
+              <button type="submit" [disabled]="currentRole() !== 'OWNER' || networkForm.invalid || networkSaving()">
+                {{ networkSaving() ? 'Saving...' : 'Save network access' }}
+              </button>
+              @if (hostNetwork()?.restartRequired) {
+                <span class="state-badge danger">restart required</span>
+              }
+            </footer>
+          </form>
         </div>
       </details>
     </section>
@@ -395,6 +430,8 @@ export class SettingsPage {
   readonly importPreview = signal<ServerImportPreview | null>(null);
   readonly nexusState = signal<NexusConnectionState | null>(null);
   readonly nexusSaving = signal(false);
+  readonly hostNetwork = signal<HostNetworkSettings | null>(null);
+  readonly networkSaving = signal(false);
   private deployTimer?: number;
   readonly currentUsername = computed(() => this.auth.user()?.username ?? 'Unknown');
   readonly currentRole = computed(() => this.auth.user()?.role ?? 'VIEWER');
@@ -436,10 +473,17 @@ export class SettingsPage {
     apiKey: ['', Validators.required],
   });
 
+  readonly networkForm = this.fb.nonNullable.group({
+    webAccessMode: ['localhost' as 'localhost' | 'lan', Validators.required],
+    port: [3333, [Validators.required, Validators.min(1), Validators.max(65535)]],
+    acknowledgeExposure: [false],
+  });
+
   constructor() {
     this.refreshServers();
     this.refreshUsers();
     this.refreshNexusState();
+    this.refreshHostNetworkSettings();
   }
 
   openDeployModal(): void {
@@ -674,6 +718,30 @@ export class SettingsPage {
     });
   }
 
+  saveNetworkSettings(): void {
+    if (this.networkForm.invalid || this.networkSaving()) return;
+    const raw = this.networkForm.getRawValue();
+    this.networkSaving.set(true);
+    this.serversService
+      .saveHostNetworkSettings({
+        webAccessMode: raw.webAccessMode,
+        port: raw.port,
+        acknowledgeExposure: raw.webAccessMode === 'lan' ? raw.acknowledgeExposure : true,
+      })
+      .subscribe({
+        next: (settings) => {
+          this.networkSaving.set(false);
+          this.hostNetwork.set(settings);
+          this.patchNetworkForm(settings);
+          this.message.set(settings.restartRequired ? 'Network access saved. Restart Palwarden to apply it.' : 'Network access saved.');
+        },
+        error: (error: { error?: { message?: string } }) => {
+          this.networkSaving.set(false);
+          this.message.set(error.error?.message ?? 'Could not save network access settings.');
+        },
+      });
+  }
+
   browseFiles(server: ServerDashboardCard): void {
     this.serversService.openFolder(server.id).subscribe({
       next: () => this.message.set(`Opened files for ${server.displayName}.`),
@@ -738,6 +806,24 @@ export class SettingsPage {
     this.serversService.nexusState().subscribe({
       next: (state) => this.nexusState.set(state),
       error: () => this.nexusState.set({ connected: false, username: null, userId: null, isPremium: false, updatedAt: null }),
+    });
+  }
+
+  private refreshHostNetworkSettings(): void {
+    this.serversService.hostNetworkSettings().subscribe({
+      next: (settings) => {
+        this.hostNetwork.set(settings);
+        this.patchNetworkForm(settings);
+      },
+      error: () => this.hostNetwork.set(null),
+    });
+  }
+
+  private patchNetworkForm(settings: HostNetworkSettings): void {
+    this.networkForm.patchValue({
+      webAccessMode: settings.webAccessMode,
+      port: settings.port,
+      acknowledgeExposure: settings.webAccessMode === 'lan',
     });
   }
 
