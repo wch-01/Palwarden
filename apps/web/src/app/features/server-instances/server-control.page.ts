@@ -7,6 +7,7 @@ import type { ServerDashboardCard } from '@palwarden/shared';
 import { ServerInstancesService } from './server-instances.service';
 import type { BackupRecordView, DeployJob, PlayerConnectionInfo, ServerUpdateAvailability } from './server-instances.service';
 import { selectServerFromRoute } from './selected-server';
+import { maintenanceProgressView } from './deploy-progress';
 
 @Component({
   standalone: true,
@@ -121,7 +122,14 @@ import { selectServerFromRoute } from './selected-server';
             </div>
           </div>
           @if (maintenanceJob()?.status === 'error') {
-            <p class="error-text">{{ maintenanceJob()?.error || 'Maintenance failed.' }}</p>
+            <div class="maintenance-error-panel">
+              <div>
+                <strong>Maintenance failed</strong>
+                <p>{{ maintenanceErrorSummary() }}</p>
+              </div>
+              <button class="secondary-button compact" type="button" (click)="copyMaintenanceError()">Copy Error</button>
+              <pre>{{ maintenanceError() }}</pre>
+            </div>
           }
         </article>
 
@@ -255,11 +263,16 @@ import { selectServerFromRoute } from './selected-server';
               <p class="muted">{{ actionMessage() }}</p>
             </div>
           </header>
-          <div class="indeterminate-bar"><span></span></div>
+          <div class="progress-track" [class.indeterminate]="actionProgressPercent() === null">
+            <span [style.width.%]="actionProgressPercent() ?? 45"></span>
+          </div>
           <div class="spinner-line">
             <span class="loading-spinner"></span>
             <span>{{ actionDetail() }}</span>
           </div>
+          @if (actionProgressPercent() !== null) {
+            <p class="muted progress-percent">{{ actionProgressPercent() }}%</p>
+          }
         </div>
       </div>
     }
@@ -287,6 +300,7 @@ export class ServerControlPage implements OnDestroy {
   readonly actionTitle = signal('Working');
   readonly actionMessage = signal('Palwarden is processing the request.');
   readonly actionDetail = signal('Waiting for completion...');
+  readonly actionProgressPercent = signal<number | null>(null);
   readonly backupMessage = signal('');
   readonly backupBusy = signal(false);
   readonly maintenanceJob = signal<DeployJob | null>(null);
@@ -457,6 +471,25 @@ export class ServerControlPage implements OnDestroy {
     return this.maintenanceJob()?.status === 'running';
   }
 
+  maintenanceError(): string {
+    return this.maintenanceJob()?.error || 'Maintenance failed.';
+  }
+
+  maintenanceErrorSummary(): string {
+    return this.maintenanceError().split(/\r?\n/).find((line) => line.trim()) ?? 'Maintenance failed.';
+  }
+
+  copyMaintenanceError(): void {
+    if (!navigator.clipboard) {
+      this.showToast('Clipboard is not available in this window.', 'danger');
+      return;
+    }
+    void navigator.clipboard
+      .writeText(this.maintenanceError())
+      .then(() => this.showToast('Maintenance error copied.'))
+      .catch(() => this.showToast('Could not copy maintenance error.', 'danger'));
+  }
+
   private startUpdate(payload: { broadcastMessage?: string; shutdownWaitSeconds?: number }): void {
     const server = this.server();
     if (!server || this.maintenanceBusy()) return;
@@ -464,7 +497,7 @@ export class ServerControlPage implements OnDestroy {
     this.service.updateServer(server.id, payload).subscribe({
       next: (job) => {
         this.maintenanceJob.set(job);
-        this.actionDetail.set('SteamCMD update is running...');
+        this.applyMaintenanceProgress(job, 'update');
         this.pollMaintenance(job.id, 'update');
       },
       error: (error: { error?: { message?: string } }) => {
@@ -481,7 +514,7 @@ export class ServerControlPage implements OnDestroy {
     this.service.validateServer(server.id).subscribe({
       next: (job) => {
         this.maintenanceJob.set(job);
-        this.actionDetail.set('SteamCMD validation is running...');
+        this.applyMaintenanceProgress(job, 'validation');
         this.pollMaintenance(job.id, 'validation');
       },
       error: (error: { error?: { message?: string } }) => {
@@ -641,6 +674,7 @@ export class ServerControlPage implements OnDestroy {
     this.updatePollTimer = window.setInterval(() => {
       this.service.maintenanceStatus(jobId).subscribe((job) => {
         this.maintenanceJob.set(job);
+        this.applyMaintenanceProgress(job, label);
         if (job.status !== 'running') {
           this.stopUpdatePolling();
           this.endAction();
@@ -695,11 +729,21 @@ export class ServerControlPage implements OnDestroy {
     this.actionTitle.set(title);
     this.actionMessage.set(message);
     this.actionDetail.set('Waiting for completion...');
+    this.actionProgressPercent.set(null);
     this.actionBusy.set(true);
   }
 
   private endAction(): void {
     this.actionBusy.set(false);
+    this.actionProgressPercent.set(null);
+  }
+
+  private applyMaintenanceProgress(job: DeployJob, label: 'update' | 'validation'): void {
+    const progress = maintenanceProgressView(job.log, job.status, job.error, label);
+    this.actionTitle.set(progress.title);
+    this.actionMessage.set(progress.step);
+    this.actionDetail.set(progress.detail);
+    this.actionProgressPercent.set(progress.percent);
   }
 
   private patchNetworkForm(server: ServerDashboardCard): void {

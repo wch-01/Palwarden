@@ -2,17 +2,38 @@ import { app, BrowserWindow, dialog, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 
 let backend: ChildProcess | null = null;
+let mainWindow: BrowserWindow | null = null;
 let quitting = false;
-const port = process.env.PALWARDEN_PORT || '3333';
-const localUrl = `http://127.0.0.1:${port}`;
+let port = process.env.PALWARDEN_PORT || '';
+let localUrl = '';
+let desktopUrl = '';
 
 app.setName('Palwarden');
 
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) {
+      return;
+    }
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+  });
+}
+
 void app.whenReady().then(async () => {
   try {
+    port = port || String(await findOpenPort());
+    localUrl = `http://127.0.0.1:${port}`;
+    desktopUrl = `${localUrl}/dashboard`;
     startBackend();
     await waitForPalwarden();
     createWindow();
@@ -34,7 +55,7 @@ app.on('before-quit', () => {
 });
 
 function createWindow(): void {
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 1100,
@@ -50,12 +71,16 @@ function createWindow(): void {
     },
   });
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  void window.loadURL(localUrl);
+  void mainWindow.loadURL(desktopUrl);
 }
 
 function startBackend(): void {
@@ -114,4 +139,21 @@ function appIconPath(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findOpenPort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (typeof address === 'object' && address?.port) {
+          resolvePort(address.port);
+          return;
+        }
+        reject(new Error('Could not allocate a local Palwarden port.'));
+      });
+    });
+  });
 }

@@ -353,6 +353,41 @@ code,
   margin-bottom: 14px;
 }
 
+.maintenance-error-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  align-items: start;
+  padding: 12px;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+}
+
+.maintenance-error-panel strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.maintenance-error-panel p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.maintenance-error-panel pre {
+  grid-column: 1 / -1;
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+  color: #7f1d1d;
+  font: 0.82rem/1.45 Consolas, "Liberation Mono", monospace;
+}
+
 .panel-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -838,6 +873,24 @@ code,
   height: 18px;
 }
 
+.delete-files-toggle {
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff7f7;
+}
+
+.delete-files-toggle span {
+  display: grid;
+  gap: 4px;
+}
+
+.delete-files-toggle small {
+  color: #6b7280;
+  font-weight: 600;
+}
+
 .server-instance-list {
   display: grid;
   gap: 12px;
@@ -957,6 +1010,10 @@ code,
 }
 
 .modal-wide {
+  grid-column: 1 / -1;
+}
+
+.modal-span-2 {
   grid-column: 1 / -1;
 }
 
@@ -1284,9 +1341,56 @@ code,
   margin-top: 14px;
 }
 
+.import-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.import-folder-row label {
+  min-width: 0;
+}
+
+.import-folder-row button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
 .import-warning-panel {
   margin-top: 14px;
   padding: 12px;
+}
+
+.detected-paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.detected-paths div {
+  min-width: 0;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+}
+
+.detected-paths span {
+  display: block;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.detected-paths strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 0.88rem;
 }
 
 .logs-panel {
@@ -2506,7 +2610,8 @@ code,
     flex-direction: column;
   }
   .server-instance-main dl,
-  .modal-grid {
+  .modal-grid,
+  .detected-paths {
     grid-template-columns: 1fr;
   }
   .server-instance-actions,
@@ -2543,6 +2648,12 @@ code,
   .import-preview-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+  .import-folder-row {
+    grid-template-columns: 1fr;
+  }
+  .import-folder-row button {
+    width: 100%;
   }
   .mods-toolbar {
     grid-template-columns: 1fr;

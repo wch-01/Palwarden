@@ -11,8 +11,8 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Get('state')
-  async state(@Req() req: Request): Promise<AuthState> {
-    const restored = await this.auth.restore(req);
+  async state(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<AuthState> {
+    const restored = await this.auth.restoreOrCreateDevSession(req, res);
     return {
       setupRequired: await this.auth.setupRequired(),
       user: restored.user,

@@ -9,6 +9,7 @@ const configSchema = z.object({
   PALWARDEN_CORS_ORIGINS: z.string().default('http://localhost:4200'),
   PALWARDEN_MASTER_KEY: z.string().optional(),
   PALWARDEN_DATA_DIR: z.string().optional(),
+  PALWARDEN_DEV_AUTO_LOGIN: z.coerce.boolean().default(false),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

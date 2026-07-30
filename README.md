@@ -94,6 +94,11 @@ Optional for development: set `PALWARDEN_DATA_DIR` to a writable folder for
 SteamCMD downloads, server installs, backups, and runtime data. When omitted,
 Palwarden uses `%LOCALAPPDATA%\Palwarden\data` on Windows.
 
+For local development only, `PALWARDEN_DEV_AUTO_LOGIN=true` creates and signs in
+a localhost-only owner account with username `Dev` and password `wardenDev`.
+This setting is ignored outside `NODE_ENV=development` and should not be used for
+packaged builds or LAN/web exposure testing.
+
 Run the database migration:
 
 ```powershell
@@ -195,15 +200,10 @@ Official Palworld REST API documentation is the source of truth for server API b
 - Windows startup registration and global start-servers-on-launch policy.
 - Settings page completion for user access, server instance management, file paths, and automation.
 - Backup UI polish, restore progress, and clearer recovery messaging.
-- New server install UI should use a modal loading/progress experience instead of plain SteamCMD output at the bottom of the page.
-- Fix mod thumbnails in both Electron and browser access.
-- Hide Windows console windows for launched server/update/helper processes where possible.
-- Correct dashboard installed-mod counts from Palwarden's local inventory.
-- Fix CPU usage sampling when the server is active.
-- Make copy-worthy app text selectable, including paths, URLs, settings, logs, errors, and diagnostics.
+- Add an explicit admin override to continue a server update when the before-update backup fails.
 - Investigate metric differences between Electron and browser dashboards.
 - Add playit.gg settings to the Server Control Player Connection card for guided tunnel setup.
-- Signed MSI/EXE installer, tray icon, custom app icon, Windows service mode, and uninstall entry.
+- Signed MSI/EXE installer, tray icon, Windows service mode, and uninstall entry.
 
 ## Todo: Waiting On Palworld API Support
 

@@ -12,6 +12,10 @@ $nodeZip = Join-Path $cache "node-v$NodeVersion-win-x64.zip"
 $nodeExtract = Join-Path $cache "node-v$NodeVersion-win-x64"
 $nodeUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
 
+$env:CI = 'true'
+$env:npm_config_confirm_modules_purge = 'false'
+$env:PNPM_CONFIG_CONFIRM_MODULES_PURGE = 'false'
+
 function Invoke-Native {
   & $args[0] $args[1..($args.Count - 1)]
   if ($LASTEXITCODE -ne 0) {
@@ -39,7 +43,7 @@ try {
   Copy-Item $nodeExtract (Join-Path $staging 'node') -Recurse
 
   $apiStage = Join-Path $staging 'api'
-  Invoke-Native pnpm.cmd --filter @palwarden/api deploy --prod --legacy --config.node-linker=hoisted $apiStage
+  Invoke-Native pnpm.cmd --filter @palwarden/api deploy --prod --legacy --config.node-linker=hoisted --config.confirmModulesPurge=false $apiStage
   Copy-Item (Join-Path $repo 'apps\api\dist') (Join-Path $apiStage 'dist') -Recurse -Force
   Copy-Item (Join-Path $repo 'apps\api\prisma') (Join-Path $apiStage 'prisma') -Recurse -Force
   Remove-Item (Join-Path $apiStage 'prisma\palwarden.db*') -Force -ErrorAction SilentlyContinue

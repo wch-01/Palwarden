@@ -126,6 +126,18 @@ type DetectedModItem = Omit<
 export class ServerInstancesService {
   private readonly deployJobs = new Map<string, DeployJobView>();
   private readonly nexusSecretKey = 'nexus.apiKey';
+  private readonly bundledUe4ssModFolders = new Set([
+    'actordumpermod',
+    'bpml_genericfunctions',
+    'bpmodloadermod',
+    'cheatmanagerenablermod',
+    'consolecommandsmod',
+    'consoleenablermod',
+    'jsbluaprofilermod',
+    'keybinds',
+    'linetracemod',
+    'splitscreenmod',
+  ]);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -348,7 +360,8 @@ export class ServerInstancesService {
 
   async create(dto: UpsertServerInstanceDto, actorId: string): Promise<ServerInstanceView> {
     await this.validate(dto);
-    const encrypted = dto.adminPassword ? this.crypto.encrypt(dto.adminPassword) : null;
+    const adminPassword = dto.adminPassword?.trim() || (await this.readConfiguredAdminPassword(dto.configurationFilePath));
+    const encrypted = adminPassword ? this.crypto.encrypt(adminPassword) : null;
     const instance = await this.prisma.serverInstance.create({ data: this.toCreateData(dto, encrypted) });
     await this.audit.record({ actorId, action: 'SERVER_CREATED', targetId: instance.id, message: 'Server profile created.' });
     if (encrypted) {
@@ -362,11 +375,12 @@ export class ServerInstancesService {
   }
 
   async importPreview(installationDirectory: string, displayName: string): Promise<ServerImportPreview> {
-    const installDirectory = this.resolveInstallPath(installationDirectory.trim());
     if (!installationDirectory.trim()) {
       throw new BadRequestException('Installation directory is required.');
     }
-    const executablePath = join(installDirectory, 'PalServer.exe');
+    const selectedDirectory = this.resolveInstallPath(installationDirectory.trim());
+    const { installDirectory, installDirectoryDetectedFromChild, installCandidates } = await this.detectPalworldInstallDirectory(selectedDirectory);
+    const executablePath = await this.detectServerExecutable(installDirectory);
     const configurationFilePath = this.settingsFile.configPath(installDirectory);
     const saveDirectory = this.settingsFile.saveDirectory(installDirectory);
     const backupDirectory = join(this.dataDirectory(), 'backups', this.sanitizeServerFolderName(displayName || 'Imported Server'));
@@ -382,7 +396,13 @@ export class ServerInstancesService {
       warnings.push('The installation directory does not exist.');
     }
     if (!executable) {
-      warnings.push('PalServer.exe was not found in the installation directory.');
+      warnings.push('No Palworld server executable was found under the detected install folder.');
+    }
+    if (installDirectoryDetectedFromChild) {
+      warnings.push(`Palwarden found the server install inside ${basename(installDirectory)} and will import that folder.`);
+    }
+    if (installCandidates.length > 1) {
+      warnings.push('More than one possible Palworld server install was found. Palwarden selected the first match; verify the detected paths before importing.');
     }
     if (!configuration) {
       warnings.push('PalWorldSettings.ini was not found in the normal WindowsServer config folder.');
@@ -412,7 +432,7 @@ export class ServerInstancesService {
         serverName: this.stringSetting(value('ServerName')),
         restApiPort: this.numberSetting(value('RESTAPIPort')),
         gamePort: this.numberSetting(value('PublicPort')),
-        queryPort: this.numberSetting(value('PublicQueryPort')),
+        queryPort: this.numberSetting(value('QueryPort')),
         maxPlayers: this.numberSetting(value('ServerPlayerMaxNum')),
         adminPasswordConfigured: Boolean(this.stringSetting(value('AdminPassword'))),
       },
@@ -493,15 +513,6 @@ export class ServerInstancesService {
   async updateNetworkSettings(id: string, dto: ServerNetworkSettingsView, actorId: string): Promise<ServerInstanceView> {
     const existing = await this.getRaw(id);
     this.validateDistinctPorts(dto.restApiPort, dto.gamePort, dto.queryPort);
-    await this.validateNoConflicts(
-      {
-        installationDirectory: existing.installationDirectory,
-        restApiPort: dto.restApiPort,
-        gamePort: dto.gamePort,
-        queryPort: dto.queryPort,
-      },
-      id,
-    );
     await this.settingsFile.updateConfigEntries(existing.configurationFilePath, {
       PublicPort: dto.gamePort,
       QueryPort: dto.queryPort,
@@ -539,11 +550,51 @@ export class ServerInstancesService {
     };
   }
 
-  async remove(id: string, actorId: string): Promise<void> {
-    await this.getRaw(id);
-    await this.processManager.assertStopped(id);
+  async assertNoActivePortConflicts(instance: ServerInstance): Promise<void> {
+    const requestedPorts = new Set([instance.restApiPort, instance.gamePort, instance.queryPort]);
+    const candidates = await this.prisma.serverInstance.findMany({
+      where: {
+        id: { not: instance.id },
+        OR: [
+          { restApiPort: { in: [...requestedPorts] } },
+          { gamePort: { in: [...requestedPorts] } },
+          { queryPort: { in: [...requestedPorts] } },
+        ],
+      },
+      orderBy: { displayName: 'asc' },
+    });
+
+    for (const candidate of candidates) {
+      const status = await this.processManager.getRecoveredStatus(candidate);
+      if (status.state !== 'running' && status.state !== 'starting' && status.state !== 'stopping') {
+        continue;
+      }
+      const conflictingPorts = [candidate.restApiPort, candidate.gamePort, candidate.queryPort].filter((port) =>
+        requestedPorts.has(port),
+      );
+      throw new BadRequestException(
+        `${candidate.displayName} is ${status.state} and already uses port ${[...new Set(conflictingPorts)].join(', ')}. Stop it or change one server's ports before starting.`,
+      );
+    }
+  }
+
+  async remove(id: string, actorId: string, options: { deleteFiles?: boolean } = {}): Promise<void> {
+    const instance = await this.getRaw(id);
+    const status = await this.processManager.getRecoveredStatus(instance);
+    if (status.state === 'running' || status.state === 'starting' || status.state === 'stopping') {
+      throw new BadRequestException('Stop the server before deleting this profile.');
+    }
+    if (options.deleteFiles) {
+      await this.deleteServerFileTargets(instance);
+    }
+    await this.prisma.backupRecord.deleteMany({ where: { serverInstanceId: id } });
     await this.prisma.serverInstance.delete({ where: { id } });
-    await this.audit.record({ actorId, action: 'SERVER_DELETED', targetId: id, message: 'Server profile deleted.' });
+    await this.audit.record({
+      actorId,
+      action: 'SERVER_DELETED',
+      targetId: id,
+      message: options.deleteFiles ? 'Server profile and files deleted.' : 'Server profile deleted.',
+    });
   }
 
   async openInstallationDirectory(id: string): Promise<{ ok: true }> {
@@ -589,8 +640,7 @@ export class ServerInstancesService {
       this.modRoot('Logic Mods', logicRoot),
       this.modRoot('UE4SS Mods', ue4ssRoot),
     ]);
-    const ue4ssInstall = await this.prisma.ue4ssInstall.findUnique({ where: { serverInstanceId: id } });
-    const ignoredUe4ssFolders = this.ue4ssLoaderModFolders(ue4ssInstall?.managedPathsJson);
+    const ignoredUe4ssFolders = await this.ignoredUe4ssLoaderModFolders(instance);
     const [pakItems, logicItems, ue4ssItems] = await Promise.all([
       this.scanPakMods(instance.installationDirectory, pakRoot, pakModsRoot),
       this.scanLogicMods(instance.installationDirectory, logicRoot),
@@ -616,8 +666,7 @@ export class ServerInstancesService {
       const pakModsRoot = join(pakRoot, '~mods');
       const logicRoot = join(pakRoot, 'LogicMods');
       const ue4ssRoot = join(instance.installationDirectory, 'Pal', 'Binaries', 'Win64', 'Mods');
-      const ue4ssInstall = await this.prisma.ue4ssInstall.findUnique({ where: { serverInstanceId: instance.id } });
-      const ignoredUe4ssFolders = this.ue4ssLoaderModFolders(ue4ssInstall?.managedPathsJson);
+      const ignoredUe4ssFolders = await this.ignoredUe4ssLoaderModFolders(instance);
       const [pakItems, logicItems, ue4ssItems, disabledItems] = await Promise.all([
         this.scanPakMods(instance.installationDirectory, pakRoot, pakModsRoot),
         this.scanLogicMods(instance.installationDirectory, logicRoot),
@@ -1121,6 +1170,17 @@ export class ServerInstancesService {
         .map((managedPath) => managedPath.split('/')[1]?.toLowerCase())
         .filter((folder): folder is string => Boolean(folder)),
     );
+  }
+
+  private async ignoredUe4ssLoaderModFolders(instance: ServerInstance): Promise<Set<string>> {
+    const record = await this.prisma.ue4ssInstall.findUnique({ where: { serverInstanceId: instance.id } });
+    const ignored = this.ue4ssLoaderModFolders(record?.managedPathsJson);
+    if (await this.isUe4ssInstalled(instance)) {
+      for (const folder of this.bundledUe4ssModFolders) {
+        ignored.add(folder);
+      }
+    }
+    return ignored;
   }
 
   private isBasePalworldPakName(name: string): boolean {
@@ -2341,7 +2401,7 @@ export class ServerInstancesService {
       this.requireDirectory(dto.saveDirectory, 'Save directory'),
       this.ensureWritableDirectory(dto.backupDirectory, 'Backup directory'),
     ]);
-    await this.validateNoConflicts(dto, existingId);
+    await this.validateNoPathConflicts(dto.installationDirectory, existingId);
   }
 
   private async runDeploy(job: DeployJobView, dto: DeployServerInstanceDto, actorId: string, installDirectory: string): Promise<void> {
@@ -2352,12 +2412,7 @@ export class ServerInstancesService {
       append('Checking ports and install folder...');
       console.log(`[deploy-job] ${job.id} checking ${installDirectory}`);
       this.validateDistinctPorts(dto.restApiPort, dto.gamePort, dto.queryPort);
-      await this.validateNoConflicts({
-        installationDirectory: installDirectory,
-        restApiPort: dto.restApiPort,
-        gamePort: dto.gamePort,
-        queryPort: dto.queryPort,
-      });
+      await this.validateNoPathConflicts(installDirectory);
       await this.requireDeployTargetAvailable(installDirectory);
       append('Installing Palworld Dedicated Server with SteamCMD...');
       console.log(`[deploy-job] ${job.id} starting SteamCMD install`);
@@ -2415,6 +2470,7 @@ export class ServerInstancesService {
 
       if (dto.startAfterInstall) {
         append('Starting Palworld server...');
+        await this.assertNoActivePortConflicts(instance);
         await this.processManager.start(instance, actorId);
       }
 
@@ -2523,25 +2579,75 @@ export class ServerInstancesService {
     }
   }
 
-  private async validateNoConflicts(
-    dto: Pick<UpsertServerInstanceDto, 'installationDirectory' | 'restApiPort' | 'gamePort' | 'queryPort'>,
-    existingId?: string,
-  ): Promise<void> {
+  private async validateNoPathConflicts(installationDirectory: string, existingId?: string): Promise<void> {
     const where: Prisma.ServerInstanceWhereInput = {
-      OR: [
-        { installationDirectory: dto.installationDirectory },
-        { restApiPort: dto.restApiPort },
-        { gamePort: dto.gamePort },
-        { queryPort: dto.queryPort },
-      ],
+      installationDirectory,
     };
     if (existingId) {
       where.id = { not: existingId };
     }
     const conflicts = await this.prisma.serverInstance.findMany({ where });
     if (conflicts.length) {
-      throw new BadRequestException('Another server profile already uses one of these paths or ports.');
+      throw new BadRequestException('Another server profile already uses this installation path.');
     }
+  }
+
+  private async deleteServerFileTargets(instance: ServerInstance): Promise<void> {
+    const installDirectory = this.resolveInstallPath(instance.installationDirectory);
+    const backupDirectory = this.resolveInstallPath(instance.backupDirectory);
+    const targets = this.uniqueDeletionTargets([installDirectory, backupDirectory]);
+    for (const target of targets) {
+      await this.assertSafeServerDeletionTarget(target, instance);
+    }
+    for (const target of targets) {
+      if (await this.directoryExists(target)) {
+        await rm(target, { recursive: true, force: true });
+      }
+    }
+  }
+
+  private uniqueDeletionTargets(paths: string[]): string[] {
+    const sorted = [...new Set(paths.map((path) => this.resolveInstallPath(path)))].sort((a, b) => a.length - b.length);
+    const targets: string[] = [];
+    for (const candidate of sorted) {
+      if (!targets.some((target) => this.isSameOrChildPath(candidate, target))) {
+        targets.push(candidate);
+      }
+    }
+    return targets;
+  }
+
+  private async assertSafeServerDeletionTarget(target: string, instance: ServerInstance): Promise<void> {
+    const resolved = this.resolveInstallPath(target);
+    const parsed = parsePath(resolved);
+    if (resolved === parsed.root) {
+      throw new BadRequestException(`Refusing to delete unsafe root path: ${resolved}`);
+    }
+    const protectedPaths = [
+      process.env.USERPROFILE,
+      process.env.LOCALAPPDATA,
+      this.dataDirectory(),
+      join(this.dataDirectory(), 'servers'),
+      join(this.dataDirectory(), 'backups'),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => this.resolveInstallPath(value));
+    if (protectedPaths.some((protectedPath) => this.pathKey(protectedPath) === this.pathKey(resolved))) {
+      throw new BadRequestException(`Refusing to delete broad Palwarden or user data path: ${resolved}`);
+    }
+    const isInstallDirectory = this.pathKey(resolved) === this.pathKey(instance.installationDirectory);
+    const isBackupDirectory = this.pathKey(resolved) === this.pathKey(instance.backupDirectory);
+    if (!isInstallDirectory && !isBackupDirectory) {
+      throw new BadRequestException('Refusing to delete a path that is not attached to this server profile.');
+    }
+    if (isInstallDirectory && !(await this.looksLikePalworldInstallDirectory(resolved))) {
+      throw new BadRequestException(`Refusing to delete install folder because it does not look like a Palworld server: ${resolved}`);
+    }
+  }
+
+  private isSameOrChildPath(candidate: string, parent: string): boolean {
+    const relation = relative(parent, candidate);
+    return relation === '' || (!relation.startsWith('..') && !isAbsolute(relation));
   }
 
   private async requireDeployTargetAvailable(path: string): Promise<void> {
@@ -2619,6 +2725,55 @@ export class ServerInstancesService {
 
   private async directoryExists(path: string): Promise<boolean> {
     return Boolean((await stat(path).catch(() => null))?.isDirectory());
+  }
+
+  private async detectPalworldInstallDirectory(
+    selectedDirectory: string,
+  ): Promise<{ installDirectory: string; installDirectoryDetectedFromChild: boolean; installCandidates: string[] }> {
+    if (await this.looksLikePalworldInstallDirectory(selectedDirectory)) {
+      return { installDirectory: selectedDirectory, installDirectoryDetectedFromChild: false, installCandidates: [selectedDirectory] };
+    }
+
+    const children = await readdir(selectedDirectory, { withFileTypes: true }).catch(() => []);
+    const childDirectories = children.filter((child) => child.isDirectory()).map((child) => join(selectedDirectory, child.name));
+    const installCandidates: string[] = [];
+    for (const childDirectory of childDirectories) {
+      if (await this.looksLikePalworldInstallDirectory(childDirectory)) {
+        installCandidates.push(childDirectory);
+      }
+    }
+
+    return {
+      installDirectory: installCandidates[0] ?? selectedDirectory,
+      installDirectoryDetectedFromChild: installCandidates.length > 0,
+      installCandidates,
+    };
+  }
+
+  private async looksLikePalworldInstallDirectory(directory: string): Promise<boolean> {
+    return (
+      (await this.fileExists(join(directory, 'PalServer.exe'))) ||
+      (await this.fileExists(join(directory, 'Pal', 'Binaries', 'Win64', 'PalServer-Win64-Shipping-Cmd.exe'))) ||
+      (await this.fileExists(this.settingsFile.configPath(directory))) ||
+      (await this.fileExists(join(directory, 'DefaultPalWorldSettings.ini')))
+    );
+  }
+
+  private async detectServerExecutable(installDirectory: string): Promise<string> {
+    const launcher = join(installDirectory, 'PalServer.exe');
+    if (await this.fileExists(launcher)) {
+      return launcher;
+    }
+    const direct = join(installDirectory, 'Pal', 'Binaries', 'Win64', 'PalServer-Win64-Shipping-Cmd.exe');
+    if (await this.fileExists(direct)) {
+      return direct;
+    }
+    return launcher;
+  }
+
+  private async readConfiguredAdminPassword(configurationFilePath: string): Promise<string | null> {
+    const entries = await this.settingsFile.readConfigEntries(configurationFilePath).catch(() => []);
+    return this.stringSetting(entries.find((entry) => entry.key === 'AdminPassword')?.value);
   }
 
   private numberSetting(value: unknown): number | null {

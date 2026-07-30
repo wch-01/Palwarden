@@ -14,6 +14,7 @@ const configPath = join(dataRoot, 'palwarden.env');
 const databasePath = join(dataRoot, 'palwarden.db');
 const port = process.env.PALWARDEN_PORT || '3333';
 const host = process.env.PALWARDEN_HOST || '127.0.0.1';
+let apiProcess = null;
 
 mkdirSync(dataRoot, { recursive: true });
 mkdirSync(logRoot, { recursive: true });
@@ -28,14 +29,30 @@ process.on('unhandledRejection', (error) => {
   process.exit(1);
 });
 
+process.on('exit', () => {
+  stopApiProcess();
+});
+
+process.on('SIGINT', () => {
+  stopApiProcess();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  stopApiProcess();
+  process.exit(0);
+});
+
 const existing = readEnvFile(configPath);
+const runtimeHost = process.env.PALWARDEN_HOST || existing.PALWARDEN_HOST || host;
+const runtimePort = process.env.PALWARDEN_PORT || existing.PALWARDEN_PORT || port;
 const config = {
   NODE_ENV: 'production',
   DATABASE_URL: existing.DATABASE_URL || `file:${databasePath.replace(/\\/g, '/')}`,
-  PALWARDEN_HOST: existing.PALWARDEN_HOST || host,
-  PALWARDEN_PORT: existing.PALWARDEN_PORT || port,
+  PALWARDEN_HOST: runtimeHost,
+  PALWARDEN_PORT: runtimePort,
   PALWARDEN_COOKIE_SECURE: existing.PALWARDEN_COOKIE_SECURE || 'false',
-  PALWARDEN_CORS_ORIGINS: existing.PALWARDEN_CORS_ORIGINS || `http://${host}:${port}`,
+  PALWARDEN_CORS_ORIGINS: process.env.PALWARDEN_CORS_ORIGINS || existing.PALWARDEN_CORS_ORIGINS || `http://${runtimeHost}:${runtimePort}`,
   PALWARDEN_MASTER_KEY: existing.PALWARDEN_MASTER_KEY || randomBytes(32).toString('base64'),
   PALWARDEN_DATA_DIR: dataRoot,
   PALWARDEN_WEB_DIST: webRoot,
@@ -102,19 +119,28 @@ function startPalwarden() {
   if (!existsSync(main)) {
     throw new Error(`Palwarden API build was not packaged at ${main}. Rebuild the Windows package.`);
   }
-  const child = spawn(process.execPath, [main], {
+  apiProcess = spawn(process.execPath, [main], {
     cwd: apiRoot,
     env: process.env,
+    windowsHide: true,
     stdio: [
       'ignore',
       openSync(join(logRoot, 'palwarden-api.out.log'), 'a'),
       openSync(join(logRoot, 'palwarden-api.err.log'), 'a'),
     ],
   });
-  child.on('exit', (code) => {
+  apiProcess.on('exit', (code) => {
+    apiProcess = null;
     writeLog(`Palwarden API process exited with code ${code || 0}.`);
     process.exit(code || 0);
   });
+}
+
+function stopApiProcess() {
+  if (apiProcess && !apiProcess.killed) {
+    writeLog(`Stopping Palwarden API process ${apiProcess.pid}.`);
+    apiProcess.kill();
+  }
 }
 
 function writeLog(message) {

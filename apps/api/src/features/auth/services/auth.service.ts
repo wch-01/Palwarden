@@ -12,6 +12,8 @@ const CSRF_COOKIE = 'palwarden.csrf';
 const SESSION_DAYS = 7;
 const LOCKOUT_MINUTES = 10;
 const MAX_FAILURES = 5;
+const DEV_USERNAME = 'Dev';
+const DEV_PASSWORD = 'wardenDev';
 
 export interface RequestUser {
   id: string;
@@ -21,6 +23,8 @@ export interface RequestUser {
 
 @Injectable()
 export class AuthService {
+  private devAutoLoginLogged = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogService,
@@ -90,6 +94,26 @@ export class AuthService {
     };
   }
 
+  async restoreOrCreateDevSession(req: Request, res: Response): Promise<{ user: RequestUser | null; csrfToken: string }> {
+    const restored = await this.restore(req);
+    if (restored.user || !this.devAutoLoginEnabled(req)) {
+      return restored;
+    }
+    const user = await this.ensureDevOwner();
+    const sessionId = nanoid(48);
+    const csrfToken = nanoid(32);
+    await this.prisma.session.create({
+      data: {
+        id: sessionId,
+        userId: user.id,
+        csrfToken,
+        expiresAt: new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+    this.setCookies(res, sessionId, csrfToken);
+    return { user, csrfToken };
+  }
+
   async logout(req: Request, res: Response): Promise<void> {
     const sessionId = this.readSessionId(req);
     if (sessionId) {
@@ -146,5 +170,33 @@ export class AuthService {
   private isLocalhost(req: Request): boolean {
     const ip = req.ip ?? '';
     return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  }
+
+  private devAutoLoginEnabled(req: Request): boolean {
+    const enabled = process.env.NODE_ENV === 'development' && process.env.PALWARDEN_DEV_AUTO_LOGIN === 'true' && this.isLocalhost(req);
+    if (enabled && !this.devAutoLoginLogged) {
+      this.devAutoLoginLogged = true;
+      console.warn('Palwarden dev auto-login is enabled for localhost development only. User: Dev');
+    }
+    return enabled;
+  }
+
+  private async ensureDevOwner(): Promise<RequestUser> {
+    const passwordHash = await argon2.hash(DEV_PASSWORD, { type: argon2.argon2id });
+    const user = await this.prisma.user.upsert({
+      where: { username: DEV_USERNAME },
+      create: {
+        username: DEV_USERNAME,
+        passwordHash,
+        role: 'OWNER',
+        disabled: false,
+      },
+      update: {
+        passwordHash,
+        role: 'OWNER',
+        disabled: false,
+      },
+    });
+    return { id: user.id, username: user.username, role: user.role };
   }
 }

@@ -8,13 +8,14 @@ import cookieParser from 'cookie-parser';
 import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { AppModule } from './app.module';
 import { corsOrigins } from './core/config/app-config';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
+  serveProductionWebApp(app);
   app.setGlobalPrefix('api');
   app.use(cookieParser());
   app.use(
@@ -49,6 +50,7 @@ async function bootstrap(): Promise<void> {
       PALWARDEN_CORS_ORIGINS: config.get('PALWARDEN_CORS_ORIGINS') ?? 'http://localhost:4200',
       PALWARDEN_MASTER_KEY: config.get('PALWARDEN_MASTER_KEY'),
       PALWARDEN_DATA_DIR: config.get('PALWARDEN_DATA_DIR'),
+      PALWARDEN_DEV_AUTO_LOGIN: config.get('PALWARDEN_DEV_AUTO_LOGIN') === 'true',
     }),
     credentials: true,
   });
@@ -59,18 +61,22 @@ async function bootstrap(): Promise<void> {
     .setVersion('0.1.0')
     .build();
   SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
-  serveProductionWebApp(app);
 
   const host = config.get<string>('PALWARDEN_HOST') ?? '127.0.0.1';
   await app.listen(Number(config.get('PALWARDEN_PORT') ?? 3333), host);
 }
 
 function serveProductionWebApp(app: NestExpressApplication): void {
-  if (process.env.NODE_ENV !== 'production') return;
-  const webRoot = process.env.PALWARDEN_WEB_DIST || firstExistingPath([join(process.cwd(), 'web'), join(process.cwd(), 'apps', 'web', 'dist', 'browser')]);
-  if (!webRoot || !existsSync(join(webRoot, 'index.html'))) return;
+  const webRoot = process.env.PALWARDEN_WEB_DIST || (process.env.NODE_ENV === 'production' ? firstExistingPath([join(process.cwd(), 'web'), join(process.cwd(), 'apps', 'web', 'dist', 'browser')]) : null);
+  const indexPath = webRoot ? join(webRoot, 'index.html') : null;
+  if (!webRoot || !indexPath || !existsSync(indexPath)) {
+    if (process.env.PALWARDEN_DESKTOP === 'true' || process.env.NODE_ENV === 'production') {
+      console.warn(`Palwarden web app was not found. PALWARDEN_WEB_DIST=${process.env.PALWARDEN_WEB_DIST ?? '(not set)'}`);
+    }
+    return;
+  }
 
-  app.useStaticAssets(webRoot, { index: false });
+  const normalizedWebRoot = resolve(webRoot);
   app.getHttpAdapter()
     .getInstance()
     .use((req: Request, res: Response, next: NextFunction) => {
@@ -78,8 +84,24 @@ function serveProductionWebApp(app: NestExpressApplication): void {
         next();
         return;
       }
-      res.sendFile(join(webRoot, 'index.html'));
+
+      const requestPath = safeRequestPath(req.path);
+      const staticPath = resolve(normalizedWebRoot, `.${requestPath}`);
+      if (staticPath.startsWith(normalizedWebRoot) && requestPath !== '/' && existsSync(staticPath)) {
+        res.sendFile(staticPath);
+        return;
+      }
+
+      res.sendFile(indexPath);
     });
+}
+
+function safeRequestPath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return '/';
+  }
 }
 
 function firstExistingPath(paths: string[]): string | null {

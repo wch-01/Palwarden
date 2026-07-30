@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -32,7 +32,30 @@ export class SteamCmdService {
       }
       onOutput(line);
     };
-    const args = [
+    const args = this.appUpdateArgs(resolvedInstallDirectory, validate);
+    onOutput(validate ? 'Validating Palworld Dedicated Server files with SteamCMD...' : 'Updating Palworld Dedicated Server with SteamCMD...');
+    let code = await this.run(steamcmd, args, captureOutput);
+    if (code !== 0) {
+      onOutput('SteamCMD exited during update; retrying once in case it self-updated.');
+      code = await this.run(steamcmd, args, captureOutput);
+    }
+    if (code !== 0 && this.looksLikeSteamManifestFailure(recentOutput)) {
+      const repaired = await this.backupAppManifest(resolvedInstallDirectory, onOutput);
+      if (repaired) {
+        onOutput('SteamCMD app metadata looked stale. Palwarden backed up the Steam app manifest and is retrying with validation.');
+        code = await this.run(steamcmd, this.appUpdateArgs(resolvedInstallDirectory, true), captureOutput);
+      }
+    }
+    if (code !== 0) {
+      throw new BadRequestException(this.formatSteamCmdFailure(code, recentOutput));
+    }
+    if (!(await this.exists(join(resolvedInstallDirectory, 'PalServer.exe')))) {
+      throw new BadRequestException('SteamCMD finished, but PalServer.exe was not found in the install directory.');
+    }
+  }
+
+  private appUpdateArgs(resolvedInstallDirectory: string, validate: boolean): string[] {
+    return [
       '+force_install_dir',
       resolvedInstallDirectory,
       '+login',
@@ -42,19 +65,6 @@ export class SteamCmdService {
       ...(validate ? ['validate'] : []),
       '+quit',
     ];
-    onOutput(validate ? 'Validating Palworld Dedicated Server files with SteamCMD...' : 'Updating Palworld Dedicated Server with SteamCMD...');
-    let code = await this.run(steamcmd, args, captureOutput);
-    if (code !== 0) {
-      onOutput('SteamCMD exited during update; retrying once in case it self-updated.');
-      code = await this.run(steamcmd, args, captureOutput);
-    }
-    if (code !== 0) {
-      const detail = recentOutput.slice(-8).join(' ');
-      throw new BadRequestException(`SteamCMD exited with code ${code}.${detail ? ` Last output: ${detail}` : ''}`);
-    }
-    if (!(await this.exists(join(resolvedInstallDirectory, 'PalServer.exe')))) {
-      throw new BadRequestException('SteamCMD finished, but PalServer.exe was not found in the install directory.');
-    }
   }
 
   async updateAvailability(installDirectory: string): Promise<SteamAppUpdateAvailability> {
@@ -145,6 +155,41 @@ export class SteamCmdService {
       return false;
     }
     return Number.parseInt(latestBuildId, 10) > Number.parseInt(installedBuildId, 10);
+  }
+
+  private looksLikeSteamManifestFailure(recentOutput: string[]): boolean {
+    const text = recentOutput.join('\n');
+    return /state is 0x6/i.test(text) || /Missing configuration/i.test(text) || /Failed downloading \d+ manifests/i.test(text);
+  }
+
+  private async backupAppManifest(resolvedInstallDirectory: string, onOutput: (line: string) => void): Promise<boolean> {
+    const manifest = join(resolvedInstallDirectory, 'steamapps', `appmanifest_${PALWORLD_DEDICATED_SERVER_APP_ID}.acf`);
+    if (!(await this.exists(manifest))) {
+      return false;
+    }
+    const backup = `${manifest}.palwarden-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await rename(manifest, backup);
+    onOutput(`Backed up stale Steam app manifest to ${backup}.`);
+    return true;
+  }
+
+  private formatSteamCmdFailure(code: number | null, recentOutput: string[]): string {
+    const detail = recentOutput
+      .filter((line) => !/type ['"]?quit['"]? to exit/i.test(line))
+      .slice(-12)
+      .join('\n');
+    const text = recentOutput.join('\n');
+    if (/Access Denied/i.test(text) || /Failed downloading \d+ manifests/i.test(text) || /state is 0x6/i.test(text)) {
+      return [
+        `SteamCMD could not download the Palworld Dedicated Server update manifest for app ${PALWORLD_DEDICATED_SERVER_APP_ID}.`,
+        'Steam reported an access or content-server failure, so the update did not complete.',
+        'This is usually a SteamCMD or Steam content delivery issue rather than a Palwarden backup problem. Try the update again, or run Validate Files after SteamCMD can reach the depot.',
+        detail ? `Recent SteamCMD output:\n${detail}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    return `SteamCMD exited with code ${code}.${detail ? `\n\nRecent SteamCMD output:\n${detail}` : ''}`;
   }
 
   private run(command: string, args: string[], onOutput: (line: string) => void): Promise<number | null> {

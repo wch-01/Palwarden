@@ -132,6 +132,39 @@ import type { ManagedUser } from './users.service';
         </section>
       }
 
+      @if (deleteServerCandidate(); as server) {
+        <section class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Delete server profile">
+          <div class="modal-panel">
+            <header>
+              <div>
+                <h2>Delete Server Profile?</h2>
+                <p class="muted">Choose whether Palwarden should only forget {{ server.displayName }} or also remove its files from disk.</p>
+              </div>
+              <button type="button" class="icon-button" (click)="cancelDeleteServer()" [disabled]="deletingServer()">x</button>
+            </header>
+            <div class="warning-panel">
+              <strong>Review before deleting</strong>
+              <p>The server must be stopped. Palwarden will forget this profile, its managed mod records, and its backup history.</p>
+              <p class="path-cell">Install folder: {{ server.installationDirectory }}</p>
+              <p class="path-cell">Backup folder: {{ server.backupDirectory }}</p>
+            </div>
+            <label class="setting-toggle delete-files-toggle">
+              <input type="checkbox" [checked]="deleteServerFiles()" (change)="deleteServerFiles.set(checked($event))" [disabled]="deletingServer()" />
+              <span>
+                <strong>Also delete server files</strong>
+                <small>Deletes the install folder, saved world files, mods, config, and this server's backup folder when the paths are safe.</small>
+              </span>
+            </label>
+            <footer>
+              <button type="button" class="secondary" (click)="cancelDeleteServer()" [disabled]="deletingServer()">Cancel</button>
+              <button type="button" class="danger" (click)="confirmDeleteServer()" [disabled]="deletingServer()">
+                {{ deletingServer() ? 'Deleting...' : deleteServerFiles() ? 'Delete Profile and Files' : 'Delete Profile' }}
+              </button>
+            </footer>
+          </div>
+        </section>
+      }
+
       <details class="settings-section" open>
         <summary>
           <span>
@@ -404,23 +437,23 @@ import type { ManagedUser } from './users.service';
             <button type="button" class="icon-button" (click)="closeModal()">x</button>
           </header>
           <div class="modal-grid">
-            <label>Name<input formControlName="displayName" /></label>
-            <label>Install directory<input formControlName="installationDirectory" /></label>
-            <label>Executable path<input formControlName="executablePath" /></label>
-            <label>Working directory<input formControlName="workingDirectory" /></label>
-            <label>Config file<input formControlName="configurationFilePath" /></label>
-            <label>Save directory<input formControlName="saveDirectory" /></label>
-            <label>Backup directory<input formControlName="backupDirectory" /></label>
+            <label>Server name<input formControlName="displayName" /></label>
+            <div class="modal-span-2 import-folder-row">
+              <label>
+                Server folder
+                <input formControlName="installationDirectory" placeholder="C:\\Path\\To\\PalworldServer or a folder containing it" />
+              </label>
+              <button type="button" class="secondary" [disabled]="importDetecting() || !importForm.controls.installationDirectory.value" (click)="detectImportPaths()">
+                {{ importDetecting() ? 'Detecting...' : 'Detect server from folder' }}
+              </button>
+            </div>
+            <label>Admin password<input type="password" formControlName="adminPassword" placeholder="Only needed if not found in config" /></label>
             <label>REST host<input formControlName="restApiHost" /></label>
             <label>REST port<input type="number" formControlName="restApiPort" /></label>
             <label>Game port<input type="number" formControlName="gamePort" /></label>
             <label>Query port<input type="number" formControlName="queryPort" /></label>
-            <label>Admin password<input type="password" formControlName="adminPassword" /></label>
           </div>
           <div class="import-preview-actions">
-            <button type="button" class="secondary" [disabled]="importDetecting() || !importForm.controls.installationDirectory.value" (click)="detectImportPaths()">
-              {{ importDetecting() ? 'Detecting...' : 'Detect paths and settings' }}
-            </button>
             @if (importPreview(); as preview) {
               <span class="muted">
                 Detected {{ preview.detected.executable ? 'executable' : 'no executable' }},
@@ -429,6 +462,34 @@ import type { ManagedUser } from './users.service';
               </span>
             }
           </div>
+          @if (importPreview(); as preview) {
+            <div class="detected-paths">
+              <div>
+                <span>Install folder</span>
+                <strong>{{ preview.installationDirectory }}</strong>
+              </div>
+              <div>
+                <span>Executable</span>
+                <strong>{{ preview.executablePath }}</strong>
+              </div>
+              <div>
+                <span>Config file</span>
+                <strong>{{ preview.configurationFilePath }}</strong>
+              </div>
+              <div>
+                <span>Save folder</span>
+                <strong>{{ preview.saveDirectory }}</strong>
+              </div>
+              <div>
+                <span>Backup folder</span>
+                <strong>{{ preview.backupDirectory }}</strong>
+              </div>
+              <div>
+                <span>Admin credential</span>
+                <strong>{{ preview.settings.adminPasswordConfigured || importForm.controls.adminPassword.value ? 'Configured' : 'Needs password' }}</strong>
+              </div>
+            </div>
+          }
           @if (importPreview()?.warnings?.length) {
             <div class="warning-panel import-warning-panel">
               <strong>Review before importing</strong>
@@ -439,7 +500,7 @@ import type { ManagedUser } from './users.service';
           }
           <footer>
             <button type="button" class="secondary" (click)="closeModal()">Cancel</button>
-            <button type="submit" [disabled]="importForm.invalid">Import server</button>
+            <button type="submit" [disabled]="importForm.invalid || !importPreview()">Import server</button>
           </footer>
         </form>
       </section>
@@ -468,7 +529,11 @@ export class SettingsPage {
   readonly nexusSaving = signal(false);
   readonly hostNetwork = signal<HostNetworkSettings | null>(null);
   readonly networkSaving = signal(false);
+  readonly deleteServerCandidate = signal<ServerDashboardCard | null>(null);
+  readonly deleteServerFiles = signal(false);
+  readonly deletingServer = signal(false);
   private deployTimer?: number;
+  private messageTimer?: number;
   readonly currentUsername = computed(() => this.auth.user()?.username ?? 'Unknown');
   readonly currentRole = computed(() => this.auth.user()?.role ?? 'VIEWER');
 
@@ -494,7 +559,7 @@ export class SettingsPage {
     backupDirectory: ['', Validators.required],
     restApiHost: ['127.0.0.1', Validators.required],
     restApiPort: [8212, Validators.required],
-    adminPassword: ['', Validators.required],
+    adminPassword: [''],
     gamePort: [8211, Validators.required],
     queryPort: [27015, Validators.required],
   });
@@ -558,6 +623,19 @@ export class SettingsPage {
     if (this.deployTimer) {
       window.clearInterval(this.deployTimer);
     }
+  }
+
+  private showMessage(message: string, durationMs = 3600): void {
+    if (this.messageTimer) {
+      window.clearTimeout(this.messageTimer);
+    }
+    this.message.set(message);
+    const isError = /failed|could not|must|stop the server|not return/i.test(message);
+    this.messageTimer = window.setTimeout(() => {
+      if (this.message() === message) {
+        this.message.set('');
+      }
+    }, isError ? Math.max(durationMs, 6500) : durationMs);
   }
 
   useDefaultDeployPath(): void {
@@ -624,11 +702,11 @@ export class SettingsPage {
     };
     this.serversService.create(payload).subscribe({
       next: () => {
-        this.message.set('Server imported.');
+        this.showMessage('Server imported.');
         this.closeModal();
         this.refreshServers();
       },
-      error: () => this.message.set('Import failed. Check the paths, ports, and admin password.'),
+      error: (error: unknown) => this.showMessage(`Import failed: ${this.formatHttpError(error)}`),
     });
   }
 
@@ -651,25 +729,40 @@ export class SettingsPage {
           gamePort: preview.settings.gamePort ?? raw.gamePort,
           queryPort: preview.settings.queryPort ?? raw.queryPort,
         });
-        this.message.set(preview.warnings.length ? 'Import detection completed with warnings.' : 'Import detection completed.');
+        this.showMessage(preview.warnings.length ? 'Import detection completed with warnings.' : 'Import detection completed.');
       },
       error: (error: { error?: { message?: string } }) => {
         this.importDetecting.set(false);
         this.importPreview.set(null);
-        this.message.set(error.error?.message ?? 'Could not detect that server install.');
+        this.showMessage(`Detection failed: ${this.formatHttpError(error)}`);
       },
     });
+  }
+
+  private formatHttpError(error: unknown): string {
+    const body = (error as { error?: { message?: unknown; error?: unknown } })?.error;
+    const message = body?.message;
+    if (Array.isArray(message)) {
+      return message.join(' ');
+    }
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+    if (typeof body?.error === 'string' && body.error.trim()) {
+      return body.error;
+    }
+    return 'Palwarden did not return a detailed reason. Check the backend log for the import request.';
   }
 
   createUser(): void {
     const raw = this.userForm.getRawValue();
     this.usersClient.create(raw).subscribe({
       next: () => {
-        this.message.set('User created.');
+        this.showMessage('User created.');
         this.closeModal();
         this.refreshUsers();
       },
-      error: (error: { error?: { message?: string } }) => this.message.set(error.error?.message ?? 'Could not create user.'),
+      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? 'Could not create user.'),
     });
   }
 
@@ -677,11 +770,11 @@ export class SettingsPage {
     if (role === user.role) return;
     this.usersClient.update(user.id, { role: role as UserRole }).subscribe({
       next: () => {
-        this.message.set('User role updated.');
+        this.showMessage('User role updated.');
         this.refreshUsers();
       },
       error: (error: { error?: { message?: string } }) => {
-        this.message.set(error.error?.message ?? 'Could not update role.');
+        this.showMessage(error.error?.message ?? 'Could not update role.');
         this.refreshUsers();
       },
     });
@@ -692,10 +785,10 @@ export class SettingsPage {
     if (!confirm(`Are you sure you want to ${action} ${user.username}?`)) return;
     this.usersClient.update(user.id, { disabled: !user.disabled }).subscribe({
       next: () => {
-        this.message.set(`User ${user.disabled ? 'enabled' : 'disabled'}.`);
+        this.showMessage(`User ${user.disabled ? 'enabled' : 'disabled'}.`);
         this.refreshUsers();
       },
-      error: (error: { error?: { message?: string } }) => this.message.set(error.error?.message ?? `Could not ${action} user.`),
+      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? `Could not ${action} user.`),
     });
   }
 
@@ -703,12 +796,12 @@ export class SettingsPage {
     const password = prompt(`Enter a new password for ${user.username}. Minimum 12 characters.`);
     if (!password) return;
     if (password.length < 12) {
-      this.message.set('Password must be at least 12 characters.');
+      this.showMessage('Password must be at least 12 characters.');
       return;
     }
     this.usersClient.update(user.id, { password }).subscribe({
-      next: () => this.message.set('Password updated.'),
-      error: (error: { error?: { message?: string } }) => this.message.set(error.error?.message ?? 'Could not update password.'),
+      next: () => this.showMessage('Password updated.'),
+      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? 'Could not update password.'),
     });
   }
 
@@ -717,10 +810,10 @@ export class SettingsPage {
     if (prompt(`Type "${expected}" to delete this Palwarden user.`) !== expected) return;
     this.usersClient.remove(user.id).subscribe({
       next: () => {
-        this.message.set('User deleted.');
+        this.showMessage('User deleted.');
         this.refreshUsers();
       },
-      error: (error: { error?: { message?: string } }) => this.message.set(error.error?.message ?? 'Could not delete user.'),
+      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? 'Could not delete user.'),
     });
   }
 
@@ -733,11 +826,11 @@ export class SettingsPage {
         this.nexusSaving.set(false);
         this.nexusState.set(state);
         this.nexusForm.reset({ apiKey: '' });
-        this.message.set('Nexus Mods API key saved.');
+        this.showMessage('Nexus Mods API key saved.');
       },
       error: (error: { error?: { message?: string } }) => {
         this.nexusSaving.set(false);
-        this.message.set(error.error?.message ?? 'Could not validate Nexus Mods API key.');
+        this.showMessage(error.error?.message ?? 'Could not validate Nexus Mods API key.');
       },
     });
   }
@@ -749,11 +842,11 @@ export class SettingsPage {
       next: (state) => {
         this.nexusSaving.set(false);
         this.nexusState.set(state);
-        this.message.set('Nexus Mods API key removed.');
+        this.showMessage('Nexus Mods API key removed.');
       },
       error: (error: { error?: { message?: string } }) => {
         this.nexusSaving.set(false);
-        this.message.set(error.error?.message ?? 'Could not remove Nexus Mods API key.');
+        this.showMessage(error.error?.message ?? 'Could not remove Nexus Mods API key.');
       },
     });
   }
@@ -773,38 +866,54 @@ export class SettingsPage {
           this.networkSaving.set(false);
           this.hostNetwork.set(settings);
           this.patchNetworkForm(settings);
-          this.message.set(settings.restartRequired ? 'Network access saved. Restart Palwarden to apply it.' : 'Network access saved.');
+          this.showMessage(settings.restartRequired ? 'Network access saved. Restart Palwarden to apply it.' : 'Network access saved.');
         },
         error: (error: { error?: { message?: string } }) => {
           this.networkSaving.set(false);
-          this.message.set(error.error?.message ?? 'Could not save network access settings.');
+          this.showMessage(error.error?.message ?? 'Could not save network access settings.');
         },
       });
   }
 
   browseFiles(server: ServerDashboardCard): void {
     this.serversService.openFolder(server.id).subscribe({
-      next: () => this.message.set(`Opened files for ${server.displayName}.`),
-      error: () => this.message.set('Could not open that server folder.'),
+      next: () => this.showMessage(`Opened files for ${server.displayName}.`),
+      error: () => this.showMessage('Could not open that server folder.'),
     });
   }
 
   deleteServer(server: ServerDashboardCard): void {
-    if (server.runtimeState !== 'stopped') {
-      this.message.set('Stop the server before deleting its profile.');
+    if (server.runtimeState === 'running' || server.runtimeState === 'starting' || server.runtimeState === 'stopping') {
+      this.showMessage('Stop the server before deleting its profile.');
       return;
     }
-    const expected = `DELETE ${server.displayName}`;
-    const entered = prompt(`Type "${expected}" to delete this server profile. Server files are not deleted.`);
-    if (entered !== expected) {
-      return;
-    }
-    this.serversService.remove(server.id).subscribe({
+    this.deleteServerFiles.set(false);
+    this.deleteServerCandidate.set(server);
+  }
+
+  cancelDeleteServer(): void {
+    if (this.deletingServer()) return;
+    this.deleteServerCandidate.set(null);
+    this.deleteServerFiles.set(false);
+  }
+
+  confirmDeleteServer(): void {
+    const server = this.deleteServerCandidate();
+    if (!server || this.deletingServer()) return;
+    this.deletingServer.set(true);
+    const deleteFiles = this.deleteServerFiles();
+    this.serversService.remove(server.id, { deleteFiles }).subscribe({
       next: () => {
-        this.message.set('Server profile deleted.');
+        this.deletingServer.set(false);
+        this.deleteServerCandidate.set(null);
+        this.deleteServerFiles.set(false);
+        this.showMessage(deleteFiles ? 'Server profile and files deleted.' : 'Server profile deleted.');
         this.refreshServers();
       },
-      error: () => this.message.set('Delete failed. Owner access is required, and the server must be stopped.'),
+      error: (error: { error?: { message?: string } }) => {
+        this.deletingServer.set(false);
+        this.showMessage(error.error?.message ?? 'Delete failed. Owner access is required, and the server must be stopped.');
+      },
     });
   }
 
@@ -825,6 +934,10 @@ export class SettingsPage {
 
   selectValue(event: Event): string {
     return (event.target as HTMLSelectElement).value;
+  }
+
+  checked(event: Event): boolean {
+    return (event.target as HTMLInputElement).checked;
   }
 
   private refreshServers(): void {
@@ -877,7 +990,7 @@ export class SettingsPage {
         this.deployLog.set(status.log);
         if (status.status === 'done') {
           this.deploying.set(false);
-          this.message.set('Server deployed.');
+          this.showMessage('Server deployed.');
           this.deployError.set('');
           this.deployLog.set(status.log);
           this.closeModal();

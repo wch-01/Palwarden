@@ -6,6 +6,7 @@ import type { ServerDashboardCard } from '@palwarden/shared';
 import { filter, Subscription } from 'rxjs';
 import { AuthService } from '../authentication/auth.service';
 import { ServerInstancesService } from '../../features/server-instances/server-instances.service';
+import { storedSelectedServerId, storeSelectedServerId } from '../../features/server-instances/selected-server';
 
 const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> = [
   { pattern: /^\/dashboard/, title: 'Dashboard', description: 'Monitor selected server health, players, and operational signals.' },
@@ -143,6 +144,7 @@ export class ShellComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedServerId.set(value);
+    storeSelectedServerId(value);
     void this.router.navigate(['/dashboard'], { queryParams: { server: value } });
   }
 
@@ -155,8 +157,9 @@ export class ShellComponent implements OnInit, OnDestroy {
       this.servers.set(servers);
       this.syncSelectedServerFromUrl(this.currentUrl());
       const firstServer = servers[0];
-      if (!this.selectedServerId() && firstServer) {
-        this.selectedServerId.set(firstServer.id);
+      const storedServer = servers.find((server) => server.id === storedSelectedServerId());
+      if (!this.selectedServerId() && (storedServer || firstServer)) {
+        this.selectedServerId.set((storedServer ?? firstServer)!.id);
       }
     });
   }
@@ -165,12 +168,14 @@ export class ShellComponent implements OnInit, OnDestroy {
     const queryServer = new URLSearchParams(url.split('?')[1] ?? '').get('server');
     if (queryServer) {
       this.selectedServerId.set(queryServer);
+      storeSelectedServerId(queryServer);
       return;
     }
     const match = /^\/servers\/([^/]+)/.exec(url);
     const id = match?.[1];
     if (id && id !== 'new') {
       this.selectedServerId.set(id);
+      storeSelectedServerId(id);
     }
   }
 

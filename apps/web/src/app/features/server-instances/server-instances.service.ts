@@ -230,8 +230,10 @@ export class ServerInstancesService {
     return this.http.get<PlayerConnectionInfo>(`/api/server-instances/${id}/player-connection`);
   }
 
-  remove(id: string) {
-    return this.http.delete<void>(`/api/server-instances/${id}`);
+  remove(id: string, options: { deleteFiles?: boolean } = {}) {
+    return this.http.delete<void>(`/api/server-instances/${id}`, {
+      params: options.deleteFiles ? { deleteFiles: 'true' } : {},
+    });
   }
 
   openFolder(id: string) {

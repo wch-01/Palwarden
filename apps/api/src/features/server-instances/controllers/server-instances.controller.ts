@@ -125,8 +125,8 @@ export class ServerInstancesController {
 
   @Roles('OWNER')
   @Delete(':id')
-  remove(@Param('id') id: string, @Req() req: Request & { user: RequestUser }) {
-    return this.instances.remove(id, req.user.id);
+  remove(@Param('id') id: string, @Query('deleteFiles') deleteFiles = 'false', @Req() req: Request & { user: RequestUser }) {
+    return this.instances.remove(id, req.user.id, { deleteFiles: deleteFiles === 'true' });
   }
 
   @Roles('ADMIN', 'OWNER')
@@ -316,6 +316,7 @@ export class ServerInstancesController {
   @Post(':id/start')
   async start(@Param('id') id: string, @Req() req: Request & { user: RequestUser }) {
     const { instance } = await this.instances.rawWithPassword(id);
+    await this.instances.assertNoActivePortConflicts(instance);
     return this.processManager.start(instance, req.user.id);
   }
 
@@ -326,6 +327,7 @@ export class ServerInstancesController {
     await this.backups.createTriggered(id, req.user.id, 'BEFORE_RESTART');
     await this.processManager.gracefulStop(instance, adminPassword, req.user.id);
     await this.processManager.waitForStopped(instance, instance.shutdownWaitSeconds + 90);
+    await this.instances.assertNoActivePortConflicts(instance);
     return this.processManager.start(instance, req.user.id);
   }
 

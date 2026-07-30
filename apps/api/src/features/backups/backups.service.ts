@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { BackupRecord, ServerInstance } from '@prisma/client';
 import { spawn } from 'node:child_process';
-import { mkdir, rm, stat } from 'node:fs/promises';
-import { basename, extname, resolve } from 'node:path';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, extname, join, resolve } from 'node:path';
 import { PrismaService } from '../../core/database/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ProcessManagerService } from '../process-manager/services/process-manager.service';
@@ -168,47 +169,55 @@ export class BackupsService {
 
   private async createArchive(saveDirectory: string, destination: string): Promise<void> {
     await this.requireDirectory(saveDirectory, 'Save directory');
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const command = "& { param([string]$SaveDirectory, [string]$Destination) $source = Join-Path $SaveDirectory '*'; Compress-Archive -Path $source -DestinationPath $Destination -Force }";
-      const child = spawn(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command, saveDirectory, destination],
-        { windowsHide: true },
-      );
-      let stderr = '';
-      child.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-      child.on('error', () => rejectPromise(new BadRequestException('Could not start the Windows backup archive tool.')));
-      child.on('exit', (code) => {
-        if (code === 0) {
-          resolvePromise();
-          return;
-        }
-        rejectPromise(new BadRequestException(stderr.trim() || 'Could not create backup archive.'));
-      });
-    });
+    const script = `
+param(
+  [Parameter(Mandatory=$true)][string]$SaveDirectory,
+  [Parameter(Mandatory=$true)][string]$Destination
+)
+$ErrorActionPreference = 'Stop'
+$source = Join-Path -Path $SaveDirectory -ChildPath '*'
+Compress-Archive -Path $source -DestinationPath $Destination -Force
+`;
+    await this.runPowerShellFile(script, [saveDirectory, destination], 'Could not create backup archive.');
   }
 
   private async expandArchive(source: string, destination: string): Promise<void> {
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const command = '& { param([string]$Source, [string]$Destination) Expand-Archive -Path $Source -DestinationPath $Destination -Force }';
-      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command, source, destination], {
-        windowsHide: true,
+    const script = `
+param(
+  [Parameter(Mandatory=$true)][string]$Source,
+  [Parameter(Mandatory=$true)][string]$Destination
+)
+$ErrorActionPreference = 'Stop'
+Expand-Archive -Path $Source -DestinationPath $Destination -Force
+`;
+    await this.runPowerShellFile(script, [source, destination], 'Could not restore backup archive.');
+  }
+
+  private async runPowerShellFile(script: string, args: string[], failureMessage: string): Promise<void> {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'palwarden-backup-'));
+    const scriptPath = join(tempRoot, 'archive.ps1');
+    await writeFile(scriptPath, script, 'utf-8');
+    try {
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args], {
+          windowsHide: true,
+        });
+        let stderr = '';
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+        });
+        child.on('error', () => rejectPromise(new BadRequestException('Could not start the Windows backup tool.')));
+        child.on('exit', (code) => {
+          if (code === 0) {
+            resolvePromise();
+            return;
+          }
+          rejectPromise(new BadRequestException(stderr.trim() || failureMessage));
+        });
       });
-      let stderr = '';
-      child.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-      child.on('error', () => rejectPromise(new BadRequestException('Could not start the Windows backup restore tool.')));
-      child.on('exit', (code) => {
-        if (code === 0) {
-          resolvePromise();
-          return;
-        }
-        rejectPromise(new BadRequestException(stderr.trim() || 'Could not restore backup archive.'));
-      });
-    });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   }
 
   private async createEmergencyBackup(instance: ServerInstance, actorId: string): Promise<BackupRecordView | null> {
@@ -290,7 +299,7 @@ export class BackupsService {
         return Array.isArray(message) ? message.join(' ') : (message ?? 'Backup failed.');
       }
     }
-    return 'Backup failed.';
+    return error instanceof Error && error.message.trim() ? error.message : 'Backup failed.';
   }
 
   private toView(record: BackupRecord): BackupRecordView {
