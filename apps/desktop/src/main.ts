@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell, session } from 'electron';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -11,6 +12,7 @@ let quitting = false;
 let port = process.env.PALWARDEN_PORT || '';
 let localUrl = '';
 let desktopUrl = '';
+const desktopToken = randomBytes(32).toString('base64url');
 
 app.setName('Palwarden');
 
@@ -36,6 +38,7 @@ void app.whenReady().then(async () => {
     desktopUrl = `${localUrl}/dashboard`;
     startBackend();
     await waitForPalwarden();
+    registerDesktopAuthHeader();
     createWindow();
   } catch (error) {
     dialog.showErrorBox('Palwarden failed to start', error instanceof Error ? error.message : String(error));
@@ -100,6 +103,7 @@ function startBackend(): void {
       PALWARDEN_DATA_DIR: dataRoot,
       PALWARDEN_PORT: port,
       PALWARDEN_DESKTOP: 'true',
+      PALWARDEN_DESKTOP_TOKEN: desktopToken,
     },
     stdio: 'ignore',
     windowsHide: true,
@@ -110,6 +114,17 @@ function startBackend(): void {
       dialog.showErrorBox('Palwarden stopped', `The Palwarden backend exited with code ${code ?? 0}.`);
       app.quit();
     }
+  });
+}
+
+function registerDesktopAuthHeader(): void {
+  const escapedPort = port.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const urlPattern = new RegExp(`^http://127\\.0\\.0\\.1:${escapedPort}/`);
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (urlPattern.test(details.url)) {
+      details.requestHeaders['x-palwarden-desktop-token'] = desktopToken;
+    }
+    callback({ requestHeaders: details.requestHeaders });
   });
 }
 

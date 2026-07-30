@@ -14,6 +14,7 @@ const LOCKOUT_MINUTES = 10;
 const MAX_FAILURES = 5;
 const DEV_USERNAME = 'Dev';
 const DEV_PASSWORD = 'wardenDev';
+const DESKTOP_USERNAME = 'Local Desktop Owner';
 
 export interface RequestUser {
   id: string;
@@ -24,6 +25,7 @@ export interface RequestUser {
 @Injectable()
 export class AuthService {
   private devAutoLoginLogged = false;
+  private desktopAutoLoginLogged = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -96,10 +98,19 @@ export class AuthService {
 
   async restoreOrCreateDevSession(req: Request, res: Response): Promise<{ user: RequestUser | null; csrfToken: string }> {
     const restored = await this.restore(req);
-    if (restored.user || !this.devAutoLoginEnabled(req)) {
+    if (restored.user) {
       return restored;
     }
-    const user = await this.ensureDevOwner();
+    if (this.desktopAutoLoginEnabled(req)) {
+      return this.createTrustedLocalSession(res, await this.ensureDesktopOwner());
+    }
+    if (!this.devAutoLoginEnabled(req)) {
+      return restored;
+    }
+    return this.createTrustedLocalSession(res, await this.ensureDevOwner());
+  }
+
+  private async createTrustedLocalSession(res: Response, user: RequestUser): Promise<{ user: RequestUser; csrfToken: string }> {
     const sessionId = nanoid(48);
     const csrfToken = nanoid(32);
     await this.prisma.session.create({
@@ -181,6 +192,17 @@ export class AuthService {
     return enabled;
   }
 
+  private desktopAutoLoginEnabled(req: Request): boolean {
+    const expected = process.env.PALWARDEN_DESKTOP_TOKEN;
+    const actual = req.header('x-palwarden-desktop-token');
+    const enabled = process.env.PALWARDEN_DESKTOP === 'true' && Boolean(expected) && actual === expected && this.isLocalhost(req);
+    if (enabled && !this.desktopAutoLoginLogged) {
+      this.desktopAutoLoginLogged = true;
+      console.warn('Palwarden trusted desktop session is enabled for this local Electron window.');
+    }
+    return enabled;
+  }
+
   private async ensureDevOwner(): Promise<RequestUser> {
     const passwordHash = await argon2.hash(DEV_PASSWORD, { type: argon2.argon2id });
     const user = await this.prisma.user.upsert({
@@ -193,6 +215,24 @@ export class AuthService {
       },
       update: {
         passwordHash,
+        role: 'OWNER',
+        disabled: false,
+      },
+    });
+    return { id: user.id, username: user.username, role: user.role };
+  }
+
+  private async ensureDesktopOwner(): Promise<RequestUser> {
+    const passwordHash = await argon2.hash(nanoid(48), { type: argon2.argon2id });
+    const user = await this.prisma.user.upsert({
+      where: { username: DESKTOP_USERNAME },
+      create: {
+        username: DESKTOP_USERNAME,
+        passwordHash,
+        role: 'OWNER',
+        disabled: false,
+      },
+      update: {
         role: 'OWNER',
         disabled: false,
       },
