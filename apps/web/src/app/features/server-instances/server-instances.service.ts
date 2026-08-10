@@ -14,6 +14,7 @@ import type {
   ServerModInventory,
   ServerModRequest,
   Ue4ssStatus,
+  PublicIpDetection,
 } from '@palwarden/shared';
 import { AuthService } from '../../core/authentication/auth.service';
 
@@ -72,6 +73,7 @@ export interface DeployJob {
 export interface UpdateServerPayload {
   broadcastMessage?: string;
   shutdownWaitSeconds?: number;
+  skipBackupOnFailure?: boolean;
 }
 
 export interface ServerUpdateAvailability {
@@ -196,6 +198,10 @@ export class ServerInstancesService {
 
   saveHostNetworkSettings(payload: { webAccessMode: 'localhost' | 'lan'; port?: number; acknowledgeExposure?: boolean }) {
     return this.http.put<HostNetworkSettings>('/api/settings/host/network', payload);
+  }
+
+  detectPublicIp() {
+    return this.http.get<PublicIpDetection>('/api/settings/host/public-ip');
   }
 
   nexusMods(list: 'trending' | 'latest_added' | 'latest_updated', query = '') {

@@ -110,6 +110,10 @@ export class AuthService {
     return this.createTrustedLocalSession(res, await this.ensureDevOwner());
   }
 
+  desktopSessionActive(req: Request): boolean {
+    return this.desktopAutoLoginEnabled(req);
+  }
+
   private async createTrustedLocalSession(res: Response, user: RequestUser): Promise<{ user: RequestUser; csrfToken: string }> {
     const sessionId = nanoid(48);
     const csrfToken = nanoid(32);

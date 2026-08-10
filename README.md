@@ -193,17 +193,38 @@ The behavior reference was `wch-01/PW-Server-Manager` at commit `47f45f6a26e7cba
 
 Official Palworld REST API documentation is the source of truth for server API behavior.
 
-## Todo: Possible With Current APIs
+## Todo: Version 1 Release
 
-- Scheduled backups under Settings > Automation.
-- Better process recovery after Palwarden restarts.
-- Windows startup registration and global start-servers-on-launch policy.
+Prioritize UI fixes, release polish, and the core host workflow needed before calling Palwarden v1.
+
+- Add a working Restart Palwarden action after Network Access changes so users do not need to restart manually.
 - Settings page completion for user access, server instance management, file paths, and automation.
 - Backup UI polish, restore progress, and clearer recovery messaging.
-- Add an explicit admin override to continue a server update when the before-update backup fails.
-- Investigate metric differences between Electron and browser dashboards.
-- Add playit.gg settings to the Server Control Player Connection card for guided tunnel setup.
-- Signed MSI/EXE installer, tray icon, Windows service mode, and uninstall entry.
+- Investigate why graceful shutdown commonly fails on the first attempt and make the first request reliable.
+- Windows startup registration for Palwarden at user login.
+- Global policy for starting selected servers when Palwarden launches.
+- Better process recovery after Palwarden restarts.
+- Investigate and normalize CPU/dashboard metrics against Windows Task Manager; Palwarden may be showing per-process or per-thread-style CPU differently than Task Manager's whole-system percentage.
+- Signed Windows installer polish, uninstall entry, and app metadata cleanup.
+
+## Todo: Ready For Test
+
+These are implemented and should be verified in the app before being treated as accepted.
+
+- Network Access save and restart-required messaging now use button-style actions.
+- Server Control shutdown confirmation uses a proper modal before graceful stop.
+- Server Update offers an explicit admin override to continue when the before-update backup fails.
+- Server Control > Player Connection can attempt to detect and display the host public IP address.
+
+## Todo: Long-Term Wish List
+
+- Scheduled backups under Settings > Automation.
+- Tray icon and background/minimize-to-tray behavior.
+- Windows service mode for running before any user logs in.
+- Auto-restart policy for failed servers.
+- Graceful-stop timeout policy with optional force-stop escalation.
+- More precise process identity validation for recovered processes.
+- Linux process adapter after Windows behavior is stable.
 
 ## Todo: Waiting On Palworld API Support
 

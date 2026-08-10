@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { HostNetworkSettings } from '@palwarden/shared';
+import type { HostNetworkSettings, PublicIpDetection } from '@palwarden/shared';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -43,6 +43,32 @@ export class HostSettingsService {
     };
     this.writeEnvFile(next);
     return this.getNetworkSettings();
+  }
+
+  async detectPublicIp(): Promise<PublicIpDetection> {
+    const settings = this.getNetworkSettings();
+    try {
+      const response = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(6000) });
+      if (!response.ok) {
+        throw new Error(`Public IP service returned ${response.status}.`);
+      }
+      const data = (await response.json()) as { ip?: unknown };
+      const publicIp = typeof data.ip === 'string' ? data.ip.trim() : '';
+      if (!publicIp) {
+        throw new Error('Public IP service did not return an address.');
+      }
+      return {
+        publicIp,
+        address: `${publicIp}:${settings.port}`,
+        message: 'Public IP detected. Router and Windows Firewall port forwarding are still required for public play.',
+      };
+    } catch {
+      return {
+        publicIp: null,
+        address: null,
+        message: 'Could not detect the public IP from this host. Enter a WAN IP or DNS name manually after configuring firewall and router forwarding.',
+      };
+    }
   }
 
   private envPath(): string {

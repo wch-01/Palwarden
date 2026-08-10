@@ -79,13 +79,20 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
               <span class="status-light"></span>
               <strong>{{ selectedServer()?.restConnectivity === 'online' ? 'online' : 'offline' }}</strong>
             </div>
-            <details class="user-menu">
-              <summary>
+            @if (trustedDesktopSession()) {
+              <div class="user-pill">
                 <span>User</span>
                 <strong>{{ username() }}</strong>
-              </summary>
-              <button type="button" (click)="logout()">Log out</button>
-            </details>
+              </div>
+            } @else {
+              <details class="user-menu">
+                <summary>
+                  <span>User</span>
+                  <strong>{{ username() }}</strong>
+                </summary>
+                <button type="button" (click)="logout()">Log out</button>
+              </details>
+            }
           </section>
         </header>
         <ion-content class="page-content">
@@ -108,6 +115,7 @@ export class ShellComponent implements OnInit, OnDestroy {
   readonly selectedServerId = signal('');
   readonly selectedServer = computed(() => this.servers().find((server) => server.id === this.selectedServerId()) ?? null);
   readonly username = computed(() => this.auth.user()?.username ?? 'Unknown');
+  readonly trustedDesktopSession = computed(() => this.auth.trustedDesktopSession());
   readonly playerCount = computed(() => {
     const server = this.selectedServer();
     if (!server) {

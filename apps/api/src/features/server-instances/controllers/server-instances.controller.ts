@@ -9,6 +9,7 @@ import type { ServerNetworkSettingsView } from '../services/server-instances.ser
 import { DeployServerInstanceDto, UpsertServerInstanceDto } from '../dto/server-instance.dto';
 import { ProcessManagerService } from '../../process-manager/services/process-manager.service';
 import { BackupsService } from '../../backups/backups.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @UseGuards(SessionGuard, RolesGuard)
 @Controller('server-instances')
@@ -17,6 +18,7 @@ export class ServerInstancesController {
     private readonly instances: ServerInstancesService,
     private readonly processManager: ProcessManagerService,
     private readonly backups: BackupsService,
+    private readonly audit: AuditLogService,
   ) {}
 
   @Get()
@@ -317,6 +319,7 @@ export class ServerInstancesController {
   async start(@Param('id') id: string, @Req() req: Request & { user: RequestUser }) {
     const { instance } = await this.instances.rawWithPassword(id);
     await this.instances.assertNoActivePortConflicts(instance);
+    await this.instances.ensureRestApiConfigForLaunch(instance);
     return this.processManager.start(instance, req.user.id);
   }
 
@@ -328,6 +331,7 @@ export class ServerInstancesController {
     await this.processManager.gracefulStop(instance, adminPassword, req.user.id);
     await this.processManager.waitForStopped(instance, instance.shutdownWaitSeconds + 90);
     await this.instances.assertNoActivePortConflicts(instance);
+    await this.instances.ensureRestApiConfigForLaunch(instance);
     return this.processManager.start(instance, req.user.id);
   }
 
@@ -335,7 +339,7 @@ export class ServerInstancesController {
   @Post(':id/update')
   updateServer(
     @Param('id') id: string,
-    @Body() body: { broadcastMessage?: string; shutdownWaitSeconds?: number },
+    @Body() body: { broadcastMessage?: string; shutdownWaitSeconds?: number; skipBackupOnFailure?: boolean },
     @Req() req: Request & { user: RequestUser },
   ) {
     return this.updateServerWithPolicy(id, body ?? {}, req.user.id);
@@ -343,10 +347,19 @@ export class ServerInstancesController {
 
   private async updateServerWithPolicy(
     id: string,
-    body: { broadcastMessage?: string; shutdownWaitSeconds?: number },
+    body: { broadcastMessage?: string; shutdownWaitSeconds?: number; skipBackupOnFailure?: boolean },
     actorId: string,
   ) {
-    await this.backups.createTriggered(id, actorId, 'BEFORE_UPDATE');
+    if (body.skipBackupOnFailure) {
+      await this.audit.record({
+        actorId,
+        action: 'SERVER_UPDATED',
+        targetId: id,
+        message: 'Server update continued after before-update backup failure by explicit admin override.',
+      });
+    } else {
+      await this.backups.createTriggered(id, actorId, 'BEFORE_UPDATE');
+    }
     return this.instances.updateServer(id, body, actorId);
   }
 

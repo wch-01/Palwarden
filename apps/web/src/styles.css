@@ -398,9 +398,9 @@ code,
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     "actions actions"
+    "broadcast shutdown"
     "connection connection"
     "maintenance maintenance"
-    "broadcast shutdown"
     "backups backups";
 }
 
@@ -439,7 +439,7 @@ code,
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .connection-address-card {
@@ -469,7 +469,20 @@ code,
   line-height: 1.35;
 }
 
+.detected-public-address {
+  margin-bottom: 14px;
+  border-color: #bae6fd;
+  background: #eff6ff;
+}
+
 .connection-state-grid {
+  margin-bottom: 14px;
+}
+
+.connection-tool-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 14px;
 }
 
@@ -2091,6 +2104,19 @@ code,
   display: grid;
   gap: 16px;
   padding-bottom: 84px;
+}
+
+.player-ops-page {
+  display: grid;
+  gap: 18px;
+}
+
+.player-ops-page .panel-grid {
+  gap: 18px;
+}
+
+.player-ops-page .panel {
+  padding: 20px;
 }
 
 .world-settings-panel {

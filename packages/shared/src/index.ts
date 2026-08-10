@@ -11,6 +11,7 @@ export interface AuthState {
   setupRequired: boolean;
   user: PublicUser | null;
   csrfToken: string;
+  trustedDesktopSession: boolean;
 }
 
 export type RuntimeState = 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' | 'unknown';
@@ -225,6 +226,12 @@ export interface HostNetworkSettings {
   localUrl: string;
   lanUrl: string | null;
   restartRequired: boolean;
+}
+
+export interface PublicIpDetection {
+  publicIp: string | null;
+  address: string | null;
+  message: string;
 }
 
 export interface SafePalworldError {

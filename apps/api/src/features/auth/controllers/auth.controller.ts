@@ -17,6 +17,7 @@ export class AuthController {
       setupRequired: await this.auth.setupRequired(),
       user: restored.user,
       csrfToken: restored.csrfToken,
+      trustedDesktopSession: this.auth.desktopSessionActive(req),
     };
   }
 

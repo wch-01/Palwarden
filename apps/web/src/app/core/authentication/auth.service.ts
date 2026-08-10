@@ -9,6 +9,7 @@ export class AuthService {
   readonly user = signal<PublicUser | null>(null);
   readonly setupRequired = signal(false);
   readonly csrfToken = signal('');
+  readonly trustedDesktopSession = signal(false);
 
   restore() {
     return this.http.get<AuthState>('/api/auth/state').pipe(
@@ -17,6 +18,7 @@ export class AuthService {
           setupRequired: false,
           user: null,
           csrfToken: '',
+          trustedDesktopSession: false,
         }),
       ),
       tap((state) => this.applyState(state)),
@@ -53,5 +55,6 @@ export class AuthService {
     this.user.set(state.user);
     this.setupRequired.set(state.setupRequired);
     this.csrfToken.set(state.csrfToken);
+    this.trustedDesktopSession.set(state.trustedDesktopSession);
   }
 }

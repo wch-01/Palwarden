@@ -19,6 +19,11 @@ export class HostSettingsController {
     return this.hostSettings.getNetworkSettings();
   }
 
+  @Get('public-ip')
+  publicIp() {
+    return this.hostSettings.detectPublicIp();
+  }
+
   @Roles('OWNER')
   @Put('network')
   async updateNetworkSettings(@Body() body: UpdateHostNetworkSettingsDto, @Req() req: { user: RequestUser }) {

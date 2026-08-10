@@ -7,6 +7,7 @@ import type { Subscription } from 'rxjs';
 import { catchError, of } from 'rxjs';
 import { deployProgressView } from './deploy-progress';
 import { ServerInstancesService } from './server-instances.service';
+import { storeSelectedServerId } from './selected-server';
 
 @Component({
   standalone: true,
@@ -282,7 +283,7 @@ export class ServerFormPage implements OnInit, OnDestroy {
             if (this.deployTimer) {
               window.clearInterval(this.deployTimer);
             }
-            void this.router.navigateByUrl(job.serverInstanceId ? `/servers/${job.serverInstanceId}/overview` : '/servers');
+            this.navigateToDashboard(job.serverInstanceId);
           }
           if (job.status === 'error') {
             if (this.deployTimer) {
@@ -305,5 +306,14 @@ export class ServerFormPage implements OnInit, OnDestroy {
       poll();
     }
     this.deployTimer = window.setInterval(poll, 1500);
+  }
+
+  private navigateToDashboard(serverInstanceId: string | null): void {
+    if (!serverInstanceId) {
+      void this.router.navigateByUrl('/dashboard');
+      return;
+    }
+    storeSelectedServerId(serverInstanceId);
+    void this.router.navigate(['/dashboard'], { queryParams: { server: serverInstanceId } });
   }
 }

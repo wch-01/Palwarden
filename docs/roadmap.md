@@ -22,25 +22,41 @@ Palwarden currently supports the first usable Windows administration loop:
 - Electron desktop package with bundled Palwarden runtime and native app window.
 - Host Network Access setting for local-only or LAN/private-network browser access.
 
-## Can Build With Current APIs
+## Version 1 Release
 
-These items can be implemented with Palwarden's own database, Windows host capabilities, SteamCMD, filesystem access, or currently documented Palworld REST endpoints.
+These items should be prioritized before calling Palwarden v1. The emphasis is UI clarity, release polish, and the core Windows host workflow.
 
-- Scheduled backups under Settings > Automation.
-- Restore progress and stronger restore safety UX.
-- If a before-update backup fails, offer an explicit admin confirmation to continue the server update without a fresh backup.
-- Audit log filtering improvements beyond the current client-side latest-entry table.
-- Better process recovery when Palwarden restarts while Palworld servers are already running.
-- More precise process identity validation for recovered processes.
-- Windows startup registration for Palwarden.
-- Global policy for starting selected servers when Palwarden launches.
-- Auto-restart policy for failed servers.
-- Graceful-stop timeout policy with optional force-stop escalation.
+- Add a working Restart Palwarden action after Network Access changes so users do not need to restart manually.
 - User access management UI for Palwarden accounts and global roles.
 - Settings page completion for server instance paths, file browsing, and automation.
-- Investigate and normalize dashboard metric polling differences between the Electron window and browser web UI.
-- Add playit.gg settings to the Server Control Player Connection card for guided tunnel setup.
-- Signed MSI/EXE installer, tray icon, Windows service mode, and uninstall entry.
+- Restore progress and stronger restore safety UX.
+- Investigate why graceful shutdown commonly fails on the first attempt and make the first request reliable.
+- Windows startup registration for Palwarden at user login.
+- Global policy for starting selected servers when Palwarden launches.
+- Better process recovery when Palwarden restarts while Palworld servers are already running.
+- Investigate and normalize CPU/dashboard metrics against Windows Task Manager; Palwarden may be showing per-process or per-thread-style CPU differently than Task Manager's whole-system percentage.
+- Signed Windows installer polish, uninstall entry, and app metadata cleanup.
+
+## Ready For Test
+
+These are implemented and should be verified in the app before being treated as accepted.
+
+- Network Access save and restart-required messaging use clearer button-style actions.
+- Server Control shutdown confirmation uses a proper modal before graceful stop.
+- Server Update offers an explicit admin override to continue when the before-update backup fails.
+- Server Control > Player Connection can attempt to detect and display the host public IP address.
+
+## Long-Term Wish List
+
+These items can be implemented with Palwarden's own database, Windows host capabilities, SteamCMD, filesystem access, or currently documented Palworld REST endpoints, but they are not required for the first v1 release.
+
+- Scheduled backups under Settings > Automation.
+- Audit log filtering improvements beyond the current client-side latest-entry table.
+- Tray icon and background/minimize-to-tray behavior.
+- Windows service mode for running before any user logs in.
+- More precise process identity validation for recovered processes.
+- Auto-restart policy for failed servers.
+- Graceful-stop timeout policy with optional force-stop escalation.
 - Linux process adapter after Windows behavior is stable.
 
 ## Waiting On Palworld API Support
@@ -60,7 +76,7 @@ These items need official Palworld API support, clearer documentation, or a stab
 
 ## Recommended Next Work
 
-The next Palwarden-owned pass should focus on automation that does not depend on new Palworld APIs:
+The next Palwarden-owned pass should focus on v1 release polish:
 
-- Add scheduled backups.
+- Tighten Settings UI actions for Network Access, Nexus Mods, logout visibility, and restart handling.
 - Improve process recovery after Palwarden restarts.

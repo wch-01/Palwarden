@@ -104,7 +104,6 @@ interface PendingPlayerAction {
                   <th>Player ID</th>
                   <th>Level</th>
                   <th>Ping</th>
-                  <th>Buildings</th>
                   <th>Location</th>
                   <th>Actions</th>
                 </tr>
@@ -120,7 +119,6 @@ interface PendingPlayerAction {
                     <td><code>{{ player.playerId || player.playeruid || 'n/a' }}</code></td>
                     <td>{{ player.level ?? 'n/a' }}</td>
                     <td>{{ player.ping ?? 'n/a' }}</td>
-                    <td>{{ player.building_count ?? 'n/a' }}</td>
                     <td>{{ formatLocation(player) }}</td>
                     <td>
                       <div class="table-actions">
@@ -135,7 +133,7 @@ interface PendingPlayerAction {
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="8">No players online.</td>
+                    <td colspan="7">No players online.</td>
                   </tr>
                 }
               </tbody>

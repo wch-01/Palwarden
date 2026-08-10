@@ -47,6 +47,14 @@ import { maintenanceProgressView } from './deploy-progress';
           </div>
         </article>
 
+        <article class="panel broadcast-panel">
+          <h2>Broadcast</h2>
+          <form [formGroup]="broadcastForm" (ngSubmit)="broadcast()">
+            <ion-item><ion-textarea label="Message" formControlName="message" /></ion-item>
+            <ion-button type="submit" [disabled]="!broadcastForm.value.message">Broadcast Message</ion-button>
+          </form>
+        </article>
+
         <article class="panel connection-panel">
           <div class="panel-header">
             <div>
@@ -66,6 +74,23 @@ import { maintenanceProgressView } from './deploy-progress';
               </div>
             }
           </div>
+          <div class="connection-tool-grid">
+            <button class="secondary-button compact" type="button" [disabled]="publicIpBusy()" (click)="detectPublicIp()">
+              {{ publicIpBusy() ? 'Detecting...' : 'Detect Public IP' }}
+            </button>
+            <a class="secondary-button compact button-link" href="https://playit.gg/" target="_blank" rel="noreferrer">Open playit.gg</a>
+            <a class="secondary-button compact button-link" href="https://tailscale.com/download" target="_blank" rel="noreferrer">Get Tailscale</a>
+          </div>
+          @if (publicIpMessage()) {
+            <p class="inline-message" [class.error-text]="!publicIpAddress()">{{ publicIpMessage() }}</p>
+          }
+          @if (publicIpAddress()) {
+            <div class="connection-address-card detected-public-address">
+              <span>Detected Public Address</span>
+              <strong>{{ publicIpAddress() }}</strong>
+              <small>Players still need your router and Windows Firewall to allow this server's game/query ports.</small>
+            </div>
+          }
           <div class="stat-grid connection-state-grid">
             <div><span>Public Listing</span><strong>{{ publicListingText() }}</strong></div>
             <div><span>Game Port</span><strong>{{ item.gamePort }}</strong></div>
@@ -131,14 +156,6 @@ import { maintenanceProgressView } from './deploy-progress';
               <pre>{{ maintenanceError() }}</pre>
             </div>
           }
-        </article>
-
-        <article class="panel broadcast-panel">
-          <h2>Broadcast</h2>
-          <form [formGroup]="broadcastForm" (ngSubmit)="broadcast()">
-            <ion-item><ion-textarea label="Message" formControlName="message" /></ion-item>
-            <ion-button type="submit" [disabled]="!broadcastForm.value.message">Broadcast Message</ion-button>
-          </form>
         </article>
 
         <article class="panel shutdown-panel">
@@ -230,6 +247,43 @@ import { maintenanceProgressView } from './deploy-progress';
         </form>
       </div>
     }
+    @if (updateBackupOverrideOpen()) {
+      <div class="modal-backdrop">
+        <div class="modal-panel">
+          <header>
+            <div>
+              <h2>Backup Failed</h2>
+              <p class="muted">Palwarden could not create the before-update backup.</p>
+            </div>
+            <button class="secondary" type="button" (click)="cancelUpdateBackupOverride()">Close</button>
+          </header>
+          <p class="error-text">{{ updateBackupError() }}</p>
+          <p class="muted">Continuing can update server files without a fresh save archive. Only continue if you have another backup or accept that risk.</p>
+          <footer>
+            <button class="secondary-button" type="button" (click)="cancelUpdateBackupOverride()">Cancel update</button>
+            <button class="danger-button" type="button" (click)="continueUpdateWithoutBackup()">Continue without backup</button>
+          </footer>
+        </div>
+      </div>
+    }
+    @if (shutdownConfirmOpen()) {
+      <div class="modal-backdrop">
+        <div class="modal-panel">
+          <header>
+            <div>
+              <h2>Stop Server</h2>
+              <p class="muted">Palwarden will request a world save, send a graceful shutdown, then wait for the process to stop.</p>
+            </div>
+            <button class="secondary" type="button" (click)="shutdownConfirmOpen.set(false)">Close</button>
+          </header>
+          <p class="muted">Use this for a normal stop. Force stop remains separate because it can risk unsaved world data.</p>
+          <footer>
+            <button class="secondary-button" type="button" (click)="shutdownConfirmOpen.set(false)">Cancel</button>
+            <button class="danger-button" type="button" (click)="confirmStop()">Save and stop server</button>
+          </footer>
+        </div>
+      </div>
+    }
     @if (restoreCandidate(); as backup) {
       <div class="modal-backdrop">
         <div class="modal-panel">
@@ -307,7 +361,14 @@ export class ServerControlPage implements OnDestroy {
   readonly updateAvailability = signal<ServerUpdateAvailability | null>(null);
   readonly connectionInfo = signal<PlayerConnectionInfo | null>(null);
   readonly updateModalOpen = signal(false);
+  readonly updateBackupOverrideOpen = signal(false);
+  readonly updateBackupError = signal('');
+  readonly pendingUpdatePayload = signal<{ broadcastMessage?: string; shutdownWaitSeconds?: number } | null>(null);
+  readonly shutdownConfirmOpen = signal(false);
   readonly restoreCandidate = signal<BackupRecordView | null>(null);
+  readonly publicIpBusy = signal(false);
+  readonly publicIpAddress = signal('');
+  readonly publicIpMessage = signal('');
   readonly broadcastForm = this.fb.nonNullable.group({ message: [''] });
   readonly shutdownForm = this.fb.nonNullable.group({ seconds: [30], message: ['Server shutting down.'] });
   readonly updateForm = this.fb.nonNullable.group({
@@ -408,20 +469,27 @@ export class ServerControlPage implements OnDestroy {
 
   stop(): void {
     const server = this.server();
-    if (server && confirm('Request save and graceful shutdown for this server?')) {
-      this.beginAction('Stopping Server', 'Saving the world, sending the graceful shutdown request, then waiting for the server to stop.');
-      this.service.gracefulStop(server.id).subscribe({
-        next: () => {
-          this.actionDetail.set('Waiting for the server process to stop...');
-          this.refresh();
-          this.waitForServerState(server.id, ['stopped', 'failed', 'unknown'], 'Server stopped.');
-        },
-        error: (error: { error?: { message?: string } }) => {
-          this.endAction();
-          this.showToast(error.error?.message ?? 'Could not stop server.', 'danger');
-        },
-      });
+    if (server) {
+      this.shutdownConfirmOpen.set(true);
     }
+  }
+
+  confirmStop(): void {
+    const server = this.server();
+    if (!server) return;
+    this.shutdownConfirmOpen.set(false);
+    this.beginAction('Stopping Server', 'Saving the world, sending the graceful shutdown request, then waiting for the server to stop.');
+    this.service.gracefulStop(server.id).subscribe({
+      next: () => {
+        this.actionDetail.set('Waiting for the server process to stop...');
+        this.refresh();
+        this.waitForServerState(server.id, ['stopped', 'failed', 'unknown'], 'Server stopped.');
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.endAction();
+        this.showToast(error.error?.message ?? 'Could not stop server.', 'danger');
+      },
+    });
   }
 
   restart(): void {
@@ -493,6 +561,7 @@ export class ServerControlPage implements OnDestroy {
   private startUpdate(payload: { broadcastMessage?: string; shutdownWaitSeconds?: number }): void {
     const server = this.server();
     if (!server || this.maintenanceBusy()) return;
+    this.pendingUpdatePayload.set(payload);
     this.beginAction('Updating Server', 'Creating a safety backup, stopping the server if needed, then running SteamCMD.');
     this.service.updateServer(server.id, payload).subscribe({
       next: (job) => {
@@ -502,7 +571,58 @@ export class ServerControlPage implements OnDestroy {
       },
       error: (error: { error?: { message?: string } }) => {
         this.endAction();
+        const message = error.error?.message ?? 'Could not start server update.';
+        if (this.isBeforeUpdateBackupFailure(message)) {
+          this.updateBackupError.set(message);
+          this.updateBackupOverrideOpen.set(true);
+        } else {
+          this.showToast(message, 'danger');
+        }
+      },
+    });
+  }
+
+  private isBeforeUpdateBackupFailure(message: string): boolean {
+    return /backup|archive|compress|save directory|world save|could not save/i.test(message);
+  }
+
+  continueUpdateWithoutBackup(): void {
+    const server = this.server();
+    const payload = this.pendingUpdatePayload() ?? {};
+    if (!server || this.maintenanceBusy()) return;
+    this.updateBackupOverrideOpen.set(false);
+    this.beginAction('Updating Server', 'Running SteamCMD after explicit approval to continue without a fresh backup.');
+    this.service.updateServer(server.id, { ...payload, skipBackupOnFailure: true }).subscribe({
+      next: (job) => {
+        this.maintenanceJob.set(job);
+        this.applyMaintenanceProgress(job, 'update');
+        this.pollMaintenance(job.id, 'update');
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.endAction();
         this.showToast(error.error?.message ?? 'Could not start server update.', 'danger');
+      },
+    });
+  }
+
+  cancelUpdateBackupOverride(): void {
+    this.updateBackupOverrideOpen.set(false);
+    this.updateBackupError.set('');
+  }
+
+  detectPublicIp(): void {
+    if (this.publicIpBusy()) return;
+    this.publicIpBusy.set(true);
+    this.service.detectPublicIp().subscribe({
+      next: (result) => {
+        this.publicIpBusy.set(false);
+        this.publicIpAddress.set(result.address ?? '');
+        this.publicIpMessage.set(result.message);
+      },
+      error: () => {
+        this.publicIpBusy.set(false);
+        this.publicIpAddress.set('');
+        this.publicIpMessage.set('Could not detect the public IP from this host.');
       },
     });
   }

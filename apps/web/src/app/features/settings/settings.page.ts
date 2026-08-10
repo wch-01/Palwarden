@@ -1,9 +1,11 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AuthService } from '../../core/authentication/auth.service';
 import { deployProgressView } from '../server-instances/deploy-progress';
 import type { DeployJob, ServerPayload } from '../server-instances/server-instances.service';
 import { ServerInstancesService } from '../server-instances/server-instances.service';
+import { storeSelectedServerId } from '../server-instances/selected-server';
 import type { HostNetworkSettings, NexusConnectionState, ServerDashboardCard, ServerImportPreview, UserRole } from '@palwarden/shared';
 import { UsersClient } from './users.service';
 import type { ManagedUser } from './users.service';
@@ -282,7 +284,10 @@ import type { ManagedUser } from './users.service';
                   <input type="password" formControlName="apiKey" placeholder="Paste Nexus Mods API key" autocomplete="off" />
                 </label>
                 <div class="nexus-actions">
-                  <button type="submit" [disabled]="nexusForm.invalid || nexusSaving()">{{ nexusSaving() ? 'Checking...' : 'Save and validate' }}</button>
+                  <button type="submit" class="primary-button compact" [disabled]="nexusForm.invalid || nexusSaving()">
+                    {{ nexusSaving() ? 'Checking...' : 'Save and validate' }}
+                  </button>
+                  <a class="secondary-button compact button-link" href="https://next.nexusmods.com/settings/api-keys" target="_blank" rel="noreferrer">Open API Keys</a>
                   <button type="button" class="danger-button compact" [disabled]="!nexusState()?.connected || nexusSaving()" (click)="removeNexusKey()">Remove key</button>
                 </div>
               </form>
@@ -351,11 +356,11 @@ import type { ManagedUser } from './users.service';
             </div>
 
             <footer class="settings-actions">
-              <button type="submit" [disabled]="currentRole() !== 'OWNER' || networkForm.invalid || networkSaving()">
+              <button class="primary-button" type="submit" [disabled]="currentRole() !== 'OWNER' || networkForm.invalid || networkSaving()">
                 {{ networkSaving() ? 'Saving...' : 'Save network access' }}
               </button>
               @if (hostNetwork()?.restartRequired) {
-                <span class="state-badge danger">restart required</span>
+                <button class="secondary-button" type="button" (click)="explainNetworkRestart()">Restart required</button>
               }
             </footer>
           </form>
@@ -447,7 +452,11 @@ import type { ManagedUser } from './users.service';
                 {{ importDetecting() ? 'Detecting...' : 'Detect server from folder' }}
               </button>
             </div>
-            <label>Admin password<input type="password" formControlName="adminPassword" placeholder="Only needed if not found in config" /></label>
+            <label>
+              Palworld AdminPassword
+              <input type="password" formControlName="adminPassword" placeholder="Blank uses the detected config password" />
+              <small>If you enter a value, Palwarden writes it to PalWorldSettings.ini and stores the same value encrypted for REST API calls.</small>
+            </label>
             <label>REST host<input formControlName="restApiHost" /></label>
             <label>REST port<input type="number" formControlName="restApiPort" /></label>
             <label>Game port<input type="number" formControlName="gamePort" /></label>
@@ -486,8 +495,18 @@ import type { ManagedUser } from './users.service';
               </div>
               <div>
                 <span>Admin credential</span>
-                <strong>{{ preview.settings.adminPasswordConfigured || importForm.controls.adminPassword.value ? 'Configured' : 'Needs password' }}</strong>
+                <strong>{{ importCredentialStatus(preview) }}</strong>
               </div>
+            </div>
+            <div class="warning-panel import-password-note">
+              <strong>Palworld AdminPassword</strong>
+              @if (preview.settings.adminPasswordConfigured && !importForm.controls.adminPassword.value) {
+                <p>Palwarden will use the AdminPassword already present in the detected config file.</p>
+              } @else if (importForm.controls.adminPassword.value) {
+                <p>Palwarden will write the entered value to PalWorldSettings.ini and store the same value encrypted for API access.</p>
+              } @else {
+                <p>Enter the Palworld AdminPassword before importing so server controls can authenticate with the REST API.</p>
+              }
             </div>
           }
           @if (importPreview()?.warnings?.length) {
@@ -516,6 +535,7 @@ export class SettingsPage {
   private readonly serversService = inject(ServerInstancesService);
   private readonly usersClient = inject(UsersClient);
   private readonly fb = inject(FormBuilder);
+  private readonly router = inject(Router);
   readonly servers = signal<ServerDashboardCard[]>([]);
   readonly users = signal<ManagedUser[]>([]);
   readonly modal = signal<'deploy' | 'import' | 'user' | null>(null);
@@ -708,6 +728,13 @@ export class SettingsPage {
       },
       error: (error: unknown) => this.showMessage(`Import failed: ${this.formatHttpError(error)}`),
     });
+  }
+
+  importCredentialStatus(preview: ServerImportPreview): string {
+    if (this.importForm.controls.adminPassword.value) {
+      return 'Will write entered password';
+    }
+    return preview.settings.adminPasswordConfigured ? 'Will use config password' : 'Needs password';
   }
 
   detectImportPaths(): void {
@@ -972,6 +999,10 @@ export class SettingsPage {
     });
   }
 
+  explainNetworkRestart(): void {
+    this.showMessage('Restart Palwarden from the desktop app or shortcut to apply the saved network binding. Automatic restart is still on the v1 todo list.');
+  }
+
   private patchNetworkForm(settings: HostNetworkSettings): void {
     this.networkForm.patchValue({
       webAccessMode: settings.webAccessMode,
@@ -995,6 +1026,7 @@ export class SettingsPage {
           this.deployLog.set(status.log);
           this.closeModal();
           this.refreshServers();
+          this.navigateToDashboard(status.serverInstanceId);
         }
         if (status.status === 'error') {
           this.deploying.set(false);
@@ -1010,6 +1042,15 @@ export class SettingsPage {
 
   deployProgress() {
     return deployProgressView(this.deployLog(), this.deployError() ? 'error' : this.deploying() ? 'running' : 'done', this.deployError() || null);
+  }
+
+  private navigateToDashboard(serverInstanceId: string | null): void {
+    if (!serverInstanceId) {
+      void this.router.navigateByUrl('/dashboard');
+      return;
+    }
+    storeSelectedServerId(serverInstanceId);
+    void this.router.navigate(['/dashboard'], { queryParams: { server: serverInstanceId } });
   }
 
   dismissDeployProgress(): void {

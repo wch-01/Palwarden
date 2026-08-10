@@ -361,6 +361,9 @@ export class ServerInstancesService {
   async create(dto: UpsertServerInstanceDto, actorId: string): Promise<ServerInstanceView> {
     await this.validate(dto);
     const adminPassword = dto.adminPassword?.trim() || (await this.readConfiguredAdminPassword(dto.configurationFilePath));
+    if (dto.adminPassword?.trim()) {
+      await this.settingsFile.updateConfigEntries(dto.configurationFilePath, { AdminPassword: dto.adminPassword.trim() });
+    }
     const encrypted = adminPassword ? this.crypto.encrypt(adminPassword) : null;
     const instance = await this.prisma.serverInstance.create({ data: this.toCreateData(dto, encrypted) });
     await this.audit.record({ actorId, action: 'SERVER_CREATED', targetId: instance.id, message: 'Server profile created.' });
@@ -413,8 +416,10 @@ export class ServerInstancesService {
     if (this.stringSetting(value('RESTAPIEnabled'))?.toLowerCase() !== 'true') {
       warnings.push('REST API is not enabled in the detected config. Palwarden needs RESTAPIEnabled=True for server controls.');
     }
-    if (!this.stringSetting(value('AdminPassword'))) {
-      warnings.push('No AdminPassword was found in the detected config. Enter one before importing.');
+    if (this.stringSetting(value('AdminPassword'))) {
+      warnings.push('AdminPassword was found in the detected config. Leave the import password blank to store that same credential in Palwarden.');
+    } else {
+      warnings.push('No AdminPassword was found in the detected config. Enter one before importing; Palwarden will write it to PalWorldSettings.ini and store an encrypted copy.');
     }
     return {
       installationDirectory: installDirectory,
@@ -618,6 +623,22 @@ export class ServerInstancesService {
     return { ok: true, info: await client.info(), metrics: await client.metrics() };
   }
 
+  async ensureRestApiConfigForLaunch(instance: ServerInstance): Promise<void> {
+    try {
+      await this.settingsFile.updateConfigEntries(instance.configurationFilePath, {
+        RESTAPIEnabled: true,
+        RESTAPIPort: instance.restApiPort,
+      });
+    } catch (error) {
+      if (this.isFileWritePermissionError(error)) {
+        throw new BadRequestException(
+          'Palwarden could not enable the Palworld REST API before launch. Check that Palwarden can write PalWorldSettings.ini.',
+        );
+      }
+      throw error;
+    }
+  }
+
   async updateAvailability(id: string): Promise<ServerUpdateAvailabilityView> {
     const instance = await this.getRaw(id);
     return this.steamcmd.updateAvailability(instance.installationDirectory);
@@ -687,12 +708,14 @@ export class ServerInstancesService {
   }
 
   private localPlayerAddresses(gamePort: number): PlayerConnectionAddressView[] {
-    const addresses: PlayerConnectionAddressView[] = [];
+    const lanAddresses: PlayerConnectionAddressView[] = [];
+    const tailscaleAddresses: PlayerConnectionAddressView[] = [];
     for (const [name, entries] of Object.entries(networkInterfaces())) {
+      if (this.isVirtualAdapterName(name)) continue;
       for (const entry of entries ?? []) {
         if (entry.family !== 'IPv4' || entry.internal || !entry.address) continue;
-        const kind = this.isTailscaleAddress(entry.address) ? 'tailscale' : 'lan';
-        addresses.push({
+        const kind = this.isTailscaleAdapter(name, entry.address) ? 'tailscale' : 'lan';
+        const address: PlayerConnectionAddressView = {
           label: kind === 'tailscale' ? `Tailscale (${name})` : `LAN (${name})`,
           host: entry.address,
           port: gamePort,
@@ -702,18 +725,31 @@ export class ServerInstancesService {
             kind === 'tailscale'
               ? 'Share this with players who can reach this machine through Tailscale.'
               : 'Share this with players on the same local network.',
-        });
+        };
+        if (kind === 'tailscale') {
+          tailscaleAddresses.push(address);
+        } else {
+          lanAddresses.push(address);
+        }
       }
     }
-    addresses.push({
+    const publicAddress: PlayerConnectionAddressView = {
       label: 'Public Internet',
       host: '<public-ip-or-dns>',
       port: gamePort,
       address: `<public-ip-or-dns>:${gamePort}`,
       kind: 'public',
       note: 'Replace with your WAN IP or DNS name after firewall and router forwarding are configured.',
-    });
-    return addresses;
+    };
+    return [...lanAddresses, publicAddress, ...tailscaleAddresses];
+  }
+
+  private isVirtualAdapterName(name: string): boolean {
+    return /vEthernet|Hyper-V|Default Switch|WSL/i.test(name);
+  }
+
+  private isTailscaleAdapter(name: string, address: string): boolean {
+    return /tailscale/i.test(name) || this.isTailscaleAddress(address);
   }
 
   private isTailscaleAddress(address: string): boolean {
@@ -953,6 +989,7 @@ export class ServerInstancesService {
   async updateConfiguration(id: string, values: Record<string, string | number | boolean>, actorId: string): Promise<ServerConfigView> {
     const instance = await this.getRaw(id);
     const nextValues = { ...values };
+    const profileUpdates = this.configBackedProfileUpdates(instance, nextValues);
     const adminPassword = typeof nextValues.AdminPassword === 'string' ? nextValues.AdminPassword.trim() : '';
     delete nextValues.AdminPassword;
     if (adminPassword) {
@@ -977,6 +1014,15 @@ export class ServerInstancesService {
         );
       }
       throw error;
+    }
+    if (Object.keys(profileUpdates).length) {
+      await this.prisma.serverInstance.update({
+        where: { id },
+        data: {
+          ...profileUpdates,
+          updatedAt: new Date(),
+        },
+      });
     }
     await this.audit.record({ actorId, action: 'SERVER_UPDATED', targetId: id, message: 'Server configuration updated.' });
     return this.configuration(id);
@@ -2577,6 +2623,27 @@ export class ServerInstancesService {
     if (new Set(ports).size !== ports.length) {
       throw new BadRequestException('REST API, game, and query ports must be distinct.');
     }
+  }
+
+  private configBackedProfileUpdates(
+    instance: ServerInstance,
+    values: Record<string, string | number | boolean>,
+  ): Prisma.ServerInstanceUpdateInput {
+    const updates: Prisma.ServerInstanceUpdateInput = {};
+    if (Object.prototype.hasOwnProperty.call(values, 'RESTAPIPort')) {
+      const restApiPort = this.configPortSetting(values.RESTAPIPort, 'REST API port');
+      this.validateDistinctPorts(restApiPort, instance.gamePort, instance.queryPort);
+      updates.restApiPort = restApiPort;
+    }
+    return updates;
+  }
+
+  private configPortSetting(value: unknown, label: string): number {
+    const port = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new BadRequestException(`${label} must be a valid port between 1 and 65535.`);
+    }
+    return port;
   }
 
   private async validateNoPathConflicts(installationDirectory: string, existingId?: string): Promise<void> {

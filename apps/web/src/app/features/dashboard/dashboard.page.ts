@@ -3,6 +3,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { IonButton } from '@ionic/angular/standalone';
 import type { ServerDashboardCard } from '@palwarden/shared';
 import { ServerInstancesService } from '../server-instances/server-instances.service';
+import type { ServerRoster } from '../server-instances/server-instances.service';
 import { selectServerFromRoute } from '../server-instances/selected-server';
 
 @Component({
@@ -43,19 +44,14 @@ import { selectServerFromRoute } from '../server-instances/selected-server';
             <table class="data-table">
               <thead><tr><th>Name</th><th>Level</th><th>Steam ID</th></tr></thead>
               <tbody>
-                @for (player of players(); track player.name + '-' + player.steamid) {
-                  <tr><td>{{ player.name || 'Unknown' }}</td><td>{{ player.level ?? 'n/a' }}</td><td>{{ player.steamid || 'n/a' }}</td></tr>
+                @for (player of players(); track playerKey(player, $index)) {
+                  <tr><td>{{ player.name || 'Unknown' }}</td><td>{{ player.level ?? 'n/a' }}</td><td>{{ playerSteamId(player) }}</td></tr>
                 }
               </tbody>
             </table>
           } @else {
             <p class="muted">No online players reported by the REST API.</p>
           }
-        </article>
-
-        <article class="panel">
-          <h2>Guild Roster</h2>
-          <p class="muted">Guild data is not exposed by the current Palwarden client yet.</p>
         </article>
 
         <article class="panel">
@@ -80,7 +76,7 @@ export class DashboardPage {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   readonly server = signal<ServerDashboardCard | null>(null);
-  readonly players = signal<Array<{ name?: string; level?: number; steamid?: string }>>([]);
+  readonly players = signal<ServerRoster['players']>([]);
 
   constructor() {
     this.refresh();
@@ -120,5 +116,13 @@ export class DashboardPage {
 
   formatMemory(value: number | null): string {
     return value === null ? 'n/a' : `${value.toFixed(1)} MB`;
+  }
+
+  playerSteamId(player: ServerRoster['players'][number]): string {
+    return player.steamid || player.userId || player.accountName || 'n/a';
+  }
+
+  playerKey(player: ServerRoster['players'][number], index: number): string {
+    return player.userId || player.steamid || player.playerId || player.playeruid || player.name || `player-${index}`;
   }
 }

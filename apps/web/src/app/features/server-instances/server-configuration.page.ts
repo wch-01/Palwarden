@@ -157,8 +157,8 @@ export class ServerConfigurationPage implements OnInit, OnDestroy {
   readonly message = signal('');
   readonly toggle = (value: boolean) => !value;
   readonly dirtyCount = computed(() => this.dirty().size);
-  readonly popularEntries = computed(() => this.entries().filter((entry) => entry.popular && entry.group !== 'Local API'));
-  readonly advancedEntries = computed(() => this.entries().filter((entry) => !entry.popular && entry.group !== 'Local API'));
+  readonly popularEntries = computed(() => this.entries().filter((entry) => entry.popular));
+  readonly advancedEntries = computed(() => this.entries().filter((entry) => !entry.popular));
   readonly popularGroups = computed(() => this.groupEntries(this.popularEntries()));
   readonly advancedGroups = computed(() => this.groupEntries(this.advancedEntries()));
   readonly validationWarnings = computed(() => this.configWarnings());
