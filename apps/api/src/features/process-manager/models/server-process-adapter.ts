@@ -23,6 +23,7 @@ export interface ServerProcessAdapter {
   requestGracefulStop(instance: ServerInstance): Promise<void>;
   forceStop(instance: ServerInstance): Promise<void>;
   getStatus(instanceId: string): ServerProcessStatus;
+  recoverStatus(instance: ServerInstance): Promise<ServerProcessStatus>;
   assertStopped(instanceId: string): Promise<void>;
   logs(instanceId: string): string[];
 }

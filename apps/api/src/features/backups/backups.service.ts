@@ -20,8 +20,20 @@ export interface BackupRecordView {
   createdAt: string;
 }
 
+export interface BackupJobView {
+  id: string;
+  type: 'restore';
+  status: 'running' | 'done' | 'error';
+  log: string[];
+  error: string | null;
+  backupId: string | null;
+  emergencyBackup: BackupRecordView | null;
+}
+
 @Injectable()
 export class BackupsService {
+  private readonly jobs = new Map<string, BackupJobView>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly instances: ServerInstancesService,
@@ -43,7 +55,7 @@ export class BackupsService {
     return this.createTriggered(serverInstanceId, actorId, 'MANUAL');
   }
 
-  async createTriggered(serverInstanceId: string, actorId: string, triggerType: string): Promise<BackupRecordView> {
+  async createTriggered(serverInstanceId: string, actorId: string | undefined, triggerType: string): Promise<BackupRecordView> {
     const { instance, adminPassword } = await this.instances.rawWithPassword(serverInstanceId);
     const destination = this.backupFilePath(instance, triggerType.toLowerCase().replace(/_/g, '-'));
     try {
@@ -130,12 +142,56 @@ export class BackupsService {
     return { ok: true, deleted: result.count };
   }
 
-  async restore(serverInstanceId: string, backupId: string, actorId: string): Promise<{ ok: true; emergencyBackup: BackupRecordView | null }> {
+  startRestore(serverInstanceId: string, backupId: string, actorId: string): BackupJobView {
+    const job: BackupJobView = {
+      id: `restore-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'restore',
+      status: 'running',
+      log: ['Preparing backup restore...'],
+      error: null,
+      backupId,
+      emergencyBackup: null,
+    };
+    this.jobs.set(job.id, job);
+    setImmediate(() => {
+      void this.runRestoreJob(job, serverInstanceId, backupId, actorId);
+    });
+    return job;
+  }
+
+  getJob(jobId: string): BackupJobView {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new NotFoundException('Backup job not found.');
+    }
+    return job;
+  }
+
+  private async runRestoreJob(job: BackupJobView, serverInstanceId: string, backupId: string, actorId: string): Promise<void> {
+    try {
+      job.emergencyBackup = await this.restore(serverInstanceId, backupId, actorId, (line) => job.log.push(line));
+      job.log.push('Restore complete.');
+      job.status = 'done';
+    } catch (error) {
+      job.error = this.safeFailureMessage(error);
+      job.log.push(job.error);
+      job.status = 'error';
+    }
+  }
+
+  private async restore(
+    serverInstanceId: string,
+    backupId: string,
+    actorId: string,
+    onProgress: (line: string) => void,
+  ): Promise<BackupRecordView | null> {
+    onProgress('Checking server state...');
     const { instance } = await this.instances.rawWithPassword(serverInstanceId);
     const status = await this.processManager.getRecoveredStatus(instance);
     if (status.state === 'running' || status.state === 'starting' || status.state === 'stopping') {
       throw new BadRequestException('Stop the server before restoring a backup.');
     }
+    onProgress('Validating selected backup...');
     const record = await this.prisma.backupRecord.findFirst({ where: { id: backupId, serverInstanceId } });
     if (!record) {
       throw new NotFoundException('Backup record not found.');
@@ -146,9 +202,12 @@ export class BackupsService {
     this.assertPathInsideDirectory(record.filePath, instance.backupDirectory);
     await this.requireFile(record.filePath, 'Backup file');
 
+    onProgress('Creating emergency backup of current save directory...');
     const emergencyBackup = await this.createEmergencyBackup(instance, actorId);
+    onProgress('Clearing current save directory...');
     await rm(instance.saveDirectory, { recursive: true, force: true });
     await mkdir(instance.saveDirectory, { recursive: true });
+    onProgress('Expanding selected backup archive...');
     await this.expandArchive(record.filePath, instance.saveDirectory);
     await this.audit.record({
       actorId,
@@ -157,11 +216,30 @@ export class BackupsService {
       message: 'Backup restored.',
       metadata: { backupRecordId: backupId, emergencyBackupRecordId: emergencyBackup?.id ?? null },
     });
-    return { ok: true, emergencyBackup };
+    return emergencyBackup;
   }
 
-  private async prepareForBackup(instance: ServerInstance, adminPassword: string, actorId: string): Promise<void> {
-    const status = this.processManager.getStatus(instance.id);
+  async pruneScheduledBackups(serverInstanceId: string, retentionCount: number): Promise<void> {
+    const instance = await this.instances.get(serverInstanceId);
+    const keep = Math.max(1, retentionCount);
+    const oldRecords = await this.prisma.backupRecord.findMany({
+      where: { serverInstanceId, triggerType: 'SCHEDULED', success: true },
+      orderBy: { createdAt: 'desc' },
+      skip: keep,
+    });
+    for (const record of oldRecords) {
+      try {
+        this.assertPathInsideDirectory(record.filePath, instance.backupDirectory);
+        await rm(record.filePath, { force: true });
+      } catch {
+        // Retention cleanup should never break the scheduler loop.
+      }
+      await this.prisma.backupRecord.delete({ where: { id: record.id } }).catch(() => null);
+    }
+  }
+
+  private async prepareForBackup(instance: ServerInstance, adminPassword: string, actorId: string | undefined): Promise<void> {
+    const status = await this.processManager.getRecoveredStatus(instance);
     if (status.state === 'running') {
       await this.processManager.saveWorld(instance, adminPassword, actorId);
     }

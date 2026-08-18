@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Header, Param, Post, Put, Query, Req, Res, Sse, UseGuards } from '@nestjs/common';
-import { interval, map, Observable } from 'rxjs';
+import { interval, map, Observable, switchMap } from 'rxjs';
 import type { Request, Response } from 'express';
 import { SessionGuard } from '../../auth/guards/session.guard';
 import { Roles, RolesGuard } from '../../auth/guards/roles.guard';
@@ -95,6 +95,12 @@ export class ServerInstancesController {
   @Get('maintenance/:jobId')
   maintenanceStatus(@Param('jobId') jobId: string) {
     return this.instances.getDeployJob(jobId);
+  }
+
+  @Roles('ADMIN', 'OWNER')
+  @Get('backup-jobs/:jobId')
+  backupJob(@Param('jobId') jobId: string) {
+    return this.backups.getJob(jobId);
   }
 
   @Roles('ADMIN', 'OWNER')
@@ -390,7 +396,7 @@ export class ServerInstancesController {
   async shutdownCountdown(@Param('id') id: string, @Body() body: { seconds?: number; message?: string }, @Req() req: Request & { user: RequestUser }) {
     const { instance, adminPassword } = await this.instances.rawWithPassword(id);
     await this.processManager.shutdownCountdown(instance, adminPassword, body.seconds ?? 30, body.message ?? 'Server shutting down.', req.user.id);
-    return this.processManager.getStatus(id);
+    return this.processManager.getRecoveredStatus(instance);
   }
 
   @Roles('ADMIN', 'OWNER')
@@ -413,7 +419,7 @@ export class ServerInstancesController {
   @Roles('ADMIN', 'OWNER')
   @Post(':id/backups/:backupId/restore')
   restoreBackup(@Param('id') id: string, @Param('backupId') backupId: string, @Req() req: Request & { user: RequestUser }) {
-    return this.backups.restore(id, backupId, req.user.id);
+    return this.backups.startRestore(id, backupId, req.user.id);
   }
 
   @Roles('ADMIN', 'OWNER')
@@ -433,12 +439,13 @@ export class ServerInstancesController {
   async gracefulStop(@Param('id') id: string, @Req() req: Request & { user: RequestUser }) {
     const { instance, adminPassword } = await this.instances.rawWithPassword(id);
     await this.processManager.gracefulStop(instance, adminPassword, req.user.id);
-    return this.processManager.getStatus(id);
+    return this.processManager.getRecoveredStatus(instance);
   }
 
   @Get(':id/status')
-  status(@Param('id') id: string) {
-    return this.processManager.getStatus(id);
+  async status(@Param('id') id: string) {
+    const { instance } = await this.instances.rawWithPassword(id);
+    return this.processManager.getRecoveredStatus(instance);
   }
 
   @Get(':id/logs')
@@ -467,13 +474,17 @@ export class ServerInstancesController {
   @Sse(':id/events')
   events(@Param('id') id: string): Observable<MessageEvent> {
     return interval(1000).pipe(
+      switchMap(async () => {
+        const { instance } = await this.instances.rawWithPassword(id);
+        return {
+          status: await this.processManager.getRecoveredStatus(instance),
+          lines: this.processManager.logLines(id),
+        };
+      }),
       map(
-        () =>
+        (data) =>
           ({
-            data: {
-              status: this.processManager.getStatus(id),
-              lines: this.processManager.logLines(id),
-            },
+            data,
           }) as MessageEvent,
       ),
     );
@@ -496,6 +507,9 @@ export class ServerInstancesController {
       backupBeforeRestart: query.backupBeforeRestart === 'true',
       backupBeforeUpdate: query.backupBeforeUpdate === 'true',
       backupBeforeConfigChange: query.backupBeforeConfigChange === 'true',
+      scheduledBackupsEnabled: query.scheduledBackupsEnabled === 'true',
+      scheduledBackupIntervalMinutes: Number(query.scheduledBackupIntervalMinutes ?? 360),
+      scheduledBackupRetentionCount: Number(query.scheduledBackupRetentionCount ?? 10),
       forceStopAfterGracefulTimeout: query.forceStopAfterGracefulTimeout === 'true',
       startAfterInstall: query.startAfterInstall !== 'false',
     };

@@ -73,6 +73,6 @@ The official docs state that REST requires `RESTAPIEnabled=True`, uses HTTP Basi
 
 ## Differences from Palwarden
 
-Palwarden is a new Node.js/TypeScript application using NestJS, Angular, Ionic, Prisma, SQLite, database sessions, Argon2id, CSRF protection, encrypted credentials, per-instance routes, Swagger documentation, and an explicit process adapter boundary. Palwarden now includes an initial SteamCMD deploy-new flow for fresh servers; updates, scheduled backups, mods, and advanced player administration remain planned follow-up work.
+Palwarden is a new Node.js/TypeScript application using NestJS, Angular, Ionic, Prisma, SQLite, database sessions, Argon2id, CSRF protection, encrypted credentials, per-instance routes, Swagger documentation, and an explicit process adapter boundary. Palwarden now includes SteamCMD deploy/update/validate flows, scheduled backups, Nexus Mods workflows, UE4SS support, player operations, and Windows desktop packaging. Deeper runtime mod control and richer player/world administration remain limited by Palworld API support.
 
 As of the current mods milestone, Palwarden supports host-level Nexus key storage plus per-server local mod inventory and local enable, disable, remove, and reorder operations. Nexus browse/download/update and request-approval flows remain follow-up work.

@@ -40,8 +40,7 @@ base64 32-byte `PALWARDEN_MASTER_KEY`; the setup page only asks for the owner
 username and password during normal local setup. The optional setup token field
 is only for creating the first owner from another device.
 
-The current installer is unsigned, so Windows SmartScreen may warn on first run
-until a code-signing certificate is added.
+The current installer is unsigned, so Windows SmartScreen may warn on first run.
 
 ## Windows ZIP Package
 
@@ -74,8 +73,8 @@ base64 32-byte `PALWARDEN_MASTER_KEY`, writes `palwarden.env`, runs Prisma
 migrations, and serves the Angular UI and backend from
 `http://127.0.0.1:3333`.
 
-Electron is the main desktop-app path. Code signing, a tray icon, and optional
-Windows service mode are planned follow-up work.
+Electron is the main desktop-app path. A tray icon and optional Windows service
+mode are possible follow-up work.
 
 ## Development Setup
 
@@ -159,33 +158,38 @@ pnpm exec playwright test
 - Duplicate path and port validation.
 - Encrypted Palworld AdminPassword storage.
 - Palworld REST connection test using `/info` and `/metrics`.
-- Dashboard cards with state, REST connectivity, players, FPS, uptime, and version when reachable.
-- Windows process adapter using `child_process.spawn`.
+- Dashboard cards with server state, REST connectivity, players, server FPS, uptime, installed version, host CPU/RAM, disk usage, backup size, and installed mod count.
+- Windows process adapter using `child_process.spawn`, hidden windows, process recovery, PID detection, and per-process CPU/RAM sampling.
 - Server Control page for start, graceful stop, restart, save world, broadcast, shutdown countdown, update, validate, and manual backup.
-- Graceful stop requests save and shutdown through Palworld REST.
+- Server Control player connection card with LAN/public/Tailscale/playit.gg guidance, per-server game/query port editing, and public IP detection.
+- Graceful stop requests save and shutdown through Palworld REST, with modal confirmation and live progress feedback.
 - Live process status and log updates through SSE.
 - Host CPU and RAM metrics for tracked Palworld processes.
 - Palworld settings editor for `PalWorldSettings.ini`, including a popular-settings section and advanced fields discovered from the config file.
 - AdminPassword can be changed from Server Configuration; Palwarden writes it to config and stores its own encrypted copy.
 - Player roster with kick, ban, and unban actions through the Palworld REST API.
-- Manual backup records, backup creation, restore, delete, and failed-record cleanup.
-- Backup-before-restart, backup-before-update, and backup-before-configuration-change policies.
+- Manual backup records, backup creation, restore, delete, failed-record cleanup, and visible restore progress.
+- Backup-before-restart, backup-before-update, backup-before-configuration-change, and scheduled backup policies with retention cleanup.
 - Host-level Nexus Mods API key storage, encrypted with `PALWARDEN_MASTER_KEY`.
-- Per-server local mod inventory with enable, disable, remove, and load-order actions for Pak, LogicMods, and UE4SS mod folders.
+- Per-server Nexus Mods browsing/search, file selection, install preview, direct install, update checks, admin request/approval workflow, and UE4SS install/uninstall support.
+- Per-server local mod inventory with enable, disable, remove, rescan, and load-order actions for Pak, LogicMods, and UE4SS mod folders.
 - Audit log API and UI for administrative actions.
 - Windows package scripts with bundled Node runtime, generated master key, automatic migrations, and same-origin production hosting.
-- Electron desktop package with bundled Palwarden runtime.
+- Electron desktop package with bundled Palwarden runtime, installer metadata, shortcuts, native app window, and local trusted desktop session support.
 - Host Network Access setting for local-only vs LAN/Tailscale/private-network browser access.
+- Network Access changes show restart-required instructions instead of restarting Palwarden automatically.
+- Host settings for Windows login startup and selected-server start-on-Palwarden-launch policy.
+- Settings page sections for Nexus Mods, Network Access, Windows startup, server autostart, user access, server instances, and backup automation.
+- WebCraftHouse creator/support links in the sidebar.
 
 ## Known Limitations
 
-- SteamCMD fresh installs, updates, and validation are implemented.
-- Manual backups can be created, restored, and deleted from Server Control. Scheduled backups are not implemented yet.
-- Process recovery after Palwarden restarts is only structurally prepared; robust process identity recovery is next.
+- SteamCMD fresh installs, updates, and validation are implemented, but Steam content-server failures can still require retrying later.
+- Manual and scheduled backups can be created, restored, and deleted from Server Control and Settings.
+- Process recovery after Palwarden restarts is implemented for Windows, but stricter identity validation remains a wishlist item.
 - The Windows adapter does not force-kill during normal graceful stop.
-- Settings sections for Windows startup, global start policy, and automation are still incomplete.
-- Nexus mod browsing, direct download, update checks, and admin approval workflows are implemented as an initial working flow and need broader archive-shape testing.
-- Guild roster is a placeholder until Palworld exposes enough supported API data for it.
+- Nexus mod browsing, direct download, update checks, and admin approval workflows are implemented as an initial working flow and may need broader archive-shape testing across more mods.
+- Some server data, such as guild roster and rich player/base details, depends on future Palworld API support.
 
 ## Reference and License
 
@@ -193,48 +197,6 @@ The behavior reference was `wch-01/PW-Server-Manager` at commit `47f45f6a26e7cba
 
 Official Palworld REST API documentation is the source of truth for server API behavior.
 
-## Todo: Version 1 Release
+## Wishlist
 
-Prioritize UI fixes, release polish, and the core host workflow needed before calling Palwarden v1.
-
-- Add a working Restart Palwarden action after Network Access changes so users do not need to restart manually.
-- Settings page completion for user access, server instance management, file paths, and automation.
-- Backup UI polish, restore progress, and clearer recovery messaging.
-- Investigate why graceful shutdown commonly fails on the first attempt and make the first request reliable.
-- Windows startup registration for Palwarden at user login.
-- Global policy for starting selected servers when Palwarden launches.
-- Better process recovery after Palwarden restarts.
-- Investigate and normalize CPU/dashboard metrics against Windows Task Manager; Palwarden may be showing per-process or per-thread-style CPU differently than Task Manager's whole-system percentage.
-- Signed Windows installer polish, uninstall entry, and app metadata cleanup.
-
-## Todo: Ready For Test
-
-These are implemented and should be verified in the app before being treated as accepted.
-
-- Network Access save and restart-required messaging now use button-style actions.
-- Server Control shutdown confirmation uses a proper modal before graceful stop.
-- Server Update offers an explicit admin override to continue when the before-update backup fails.
-- Server Control > Player Connection can attempt to detect and display the host public IP address.
-
-## Todo: Long-Term Wish List
-
-- Scheduled backups under Settings > Automation.
-- Tray icon and background/minimize-to-tray behavior.
-- Windows service mode for running before any user logs in.
-- Auto-restart policy for failed servers.
-- Graceful-stop timeout policy with optional force-stop escalation.
-- More precise process identity validation for recovered processes.
-- Linux process adapter after Windows behavior is stable.
-
-## Todo: Waiting On Palworld API Support
-
-These are intentionally separated because Palwarden should not invent unsupported behavior or scrape unstable game internals when an official API is needed.
-
-- Real guild roster and guild management.
-- Authoritative installed/loaded mod list from the running server.
-- Runtime mod enable/disable or mod load-order management.
-- Save-complete event or save job status beyond the current REST `/save` success response.
-- Hot-apply server settings without restart, unless Palworld exposes a supported reload/update endpoint.
-- Richer player details such as inventory, pals, base ownership, or complete position/state data.
-- Ban list readback and richer moderation history from the server.
-- World actor snapshot UI for servers that do not expose the documented snapshot endpoint.
+Long-term ideas and items waiting on Palworld API support live in `docs/wishlist.md`.

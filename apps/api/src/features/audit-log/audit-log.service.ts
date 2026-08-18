@@ -19,11 +19,11 @@ export class AuditLogService {
   constructor(private readonly prisma: PrismaService) {}
 
   async record(input: {
-    actorId?: string;
+    actorId?: string | undefined;
     action: AuditAction;
-    targetId?: string;
+    targetId?: string | undefined;
     message: string;
-    metadata?: Record<string, unknown>;
+    metadata?: Record<string, unknown> | undefined;
   }): Promise<void> {
     await this.prisma.auditLog.create({
       data: {

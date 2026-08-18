@@ -51,6 +51,8 @@ async function bootstrap(): Promise<void> {
       PALWARDEN_MASTER_KEY: config.get('PALWARDEN_MASTER_KEY'),
       PALWARDEN_DATA_DIR: config.get('PALWARDEN_DATA_DIR'),
       PALWARDEN_DEV_AUTO_LOGIN: config.get('PALWARDEN_DEV_AUTO_LOGIN') === 'true',
+      PALWARDEN_START_SERVERS_ON_LAUNCH: config.get('PALWARDEN_START_SERVERS_ON_LAUNCH') === 'true',
+      PALWARDEN_DESKTOP_EXE: config.get('PALWARDEN_DESKTOP_EXE'),
     }),
     credentials: true,
   });

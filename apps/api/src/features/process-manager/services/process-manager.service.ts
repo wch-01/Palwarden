@@ -14,8 +14,13 @@ export class ProcessManagerService {
     private readonly audit: AuditLogService,
   ) {}
 
-  start(instance: ServerInstance, actorId: string): Promise<ServerProcessResult> {
-    void this.audit.record({ actorId, action: 'SERVER_STARTED', targetId: instance.id, message: 'Server start requested.' });
+  start(instance: ServerInstance, actorId?: string): Promise<ServerProcessResult> {
+    void this.audit.record({
+      ...(actorId ? { actorId } : {}),
+      action: 'SERVER_STARTED',
+      targetId: instance.id,
+      message: actorId ? 'Server start requested.' : 'Server start requested by Palwarden startup policy.',
+    });
     return this.adapter.start(instance);
   }
 
@@ -42,9 +47,14 @@ export class ProcessManagerService {
     throw new Error('Server did not stop before the timeout.');
   }
 
-  async saveWorld(instance: ServerInstance, adminPassword: string, actorId: string): Promise<void> {
+  async saveWorld(instance: ServerInstance, adminPassword: string, actorId?: string): Promise<void> {
     await this.palworld.forInstance(instance, adminPassword).save();
-    await this.audit.record({ actorId, action: 'WORLD_SAVE', targetId: instance.id, message: 'World save requested.' });
+    await this.audit.record({
+      ...(actorId ? { actorId } : {}),
+      action: 'WORLD_SAVE',
+      targetId: instance.id,
+      message: actorId ? 'World save requested.' : 'World save requested by scheduled backup.',
+    });
   }
 
   async announce(instance: ServerInstance, adminPassword: string, message: string, actorId: string): Promise<void> {

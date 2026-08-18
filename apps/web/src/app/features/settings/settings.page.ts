@@ -6,7 +6,15 @@ import { deployProgressView } from '../server-instances/deploy-progress';
 import type { DeployJob, ServerPayload } from '../server-instances/server-instances.service';
 import { ServerInstancesService } from '../server-instances/server-instances.service';
 import { storeSelectedServerId } from '../server-instances/selected-server';
-import type { HostNetworkSettings, NexusConnectionState, ServerDashboardCard, ServerImportPreview, UserRole } from '@palwarden/shared';
+import type {
+  HostNetworkSettings,
+  HostServerStartupSettings,
+  HostStartupSettings,
+  NexusConnectionState,
+  ServerDashboardCard,
+  ServerImportPreview,
+  UserRole,
+} from '@palwarden/shared';
 import { UsersClient } from './users.service';
 import type { ManagedUser } from './users.service';
 
@@ -21,14 +29,29 @@ import type { ManagedUser } from './users.service';
             <strong>Windows Startup</strong>
             <small>Choose whether Palwarden opens when Windows starts.</small>
           </span>
-          <span class="state-badge">planned</span>
+          <span class="state-badge" [class.online]="hostStartup()?.startWithWindows">
+            {{ hostStartup()?.startWithWindows ? 'enabled' : 'disabled' }}
+          </span>
         </summary>
         <div class="settings-section-body">
           <label class="setting-toggle">
-            <input type="checkbox" disabled />
-            <span>Start Palwarden when Windows starts</span>
+            <input
+              type="checkbox"
+              [checked]="hostStartup()?.startWithWindows"
+              [disabled]="currentRole() !== 'OWNER' || startupSaving() || !hostStartup()?.available"
+              (change)="saveStartupSettings(checked($event))"
+            />
+            <span>
+              <strong>Start Palwarden when this Windows user logs in</strong>
+              <small>{{ hostStartup()?.message || 'Loading startup status...' }}</small>
+            </span>
           </label>
-          <p class="muted">This will be wired to Windows startup registration in the host-controls pass.</p>
+          @if (hostStartup()?.registeredCommand) {
+            <div class="settings-card compact-card">
+              <h3>Registered command</h3>
+              <code>{{ hostStartup()?.registeredCommand }}</code>
+            </div>
+          }
         </div>
       </details>
 
@@ -38,14 +61,44 @@ import type { ManagedUser } from './users.service';
             <strong>Start Servers</strong>
             <small>Control which managed servers should start automatically with Palwarden.</small>
           </span>
-          <span class="state-badge">planned</span>
+          <span class="state-badge" [class.online]="serverStartup()?.startServersOnLaunch">
+            {{ serverStartup()?.autoStartServerCount || 0 }} selected
+          </span>
         </summary>
         <div class="settings-section-body">
           <label class="setting-toggle">
-            <input type="checkbox" disabled />
-            <span>Start enabled servers after Palwarden opens</span>
+            <input
+              type="checkbox"
+              [checked]="serverStartup()?.startServersOnLaunch"
+              [disabled]="currentRole() !== 'OWNER' || serverStartupSaving()"
+              (change)="saveServerStartupSettings(checked($event))"
+            />
+            <span>
+              <strong>Start selected servers after Palwarden opens</strong>
+              <small>Palwarden waits for the backend to finish booting, then starts profiles marked for auto-start.</small>
+            </span>
           </label>
-          <p class="muted">Per-server auto-start flags already exist. This section will become the global startup policy.</p>
+          @if (servers().length) {
+            <div class="startup-server-list">
+              @for (server of servers(); track server.id) {
+                <label class="startup-server-row">
+                  <input
+                    type="checkbox"
+                    [checked]="server.autoStart"
+                    [disabled]="currentRole() !== 'OWNER' || startupServerSavingId() === server.id"
+                    (change)="toggleServerAutoStart(server, checked($event))"
+                  />
+                  <span>
+                    <strong>{{ server.displayName }}</strong>
+                    <small>{{ server.installationDirectory }}</small>
+                  </span>
+                  <span class="state-badge" [class.online]="server.autoStart">{{ server.autoStart ? 'selected' : 'manual' }}</span>
+                </label>
+              }
+            </div>
+          } @else {
+            <p class="muted">Add or import a server profile before choosing launch-time servers.</p>
+          }
         </div>
       </details>
 
@@ -55,7 +108,7 @@ import type { ManagedUser } from './users.service';
             <strong>User Access</strong>
             <small>Manage Palwarden users, roles, and access.</small>
           </span>
-          <span class="state-badge">{{ currentRole() }}</span>
+          <span class="state-badge">{{ users().length || currentRole() }}</span>
         </summary>
         <div class="settings-section-body">
           <div class="section-toolbar">
@@ -63,7 +116,7 @@ import type { ManagedUser } from './users.service';
             <button type="button" [disabled]="currentRole() !== 'OWNER'" (click)="openUserModal()">Add user</button>
           </div>
           @if (currentRole() === 'OWNER') {
-            <div class="table-wrap">
+            <div class="table-wrap user-access-table">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -71,6 +124,7 @@ import type { ManagedUser } from './users.service';
                     <th>Role</th>
                     <th>Status</th>
                     <th>Created</th>
+                    <th>Updated</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -87,16 +141,17 @@ import type { ManagedUser } from './users.service';
                       </td>
                       <td><span class="state-badge" [class.online]="!user.disabled">{{ user.disabled ? 'disabled' : 'active' }}</span></td>
                       <td>{{ formatDate(user.createdAt) }}</td>
+                      <td>{{ formatDate(user.updatedAt) }}</td>
                       <td class="table-actions">
-                        <button type="button" class="secondary-button compact" (click)="toggleUserDisabled(user)">
+                        <button type="button" class="secondary-button compact" (click)="openUserAction(user, user.disabled ? 'enable' : 'disable')">
                           {{ user.disabled ? 'Enable' : 'Disable' }}
                         </button>
-                        <button type="button" class="secondary-button compact" (click)="resetUserPassword(user)">Password</button>
-                        <button type="button" class="danger-button compact" (click)="deleteUser(user)">Delete</button>
+                        <button type="button" class="secondary-button compact" (click)="openUserAction(user, 'password')">Password</button>
+                        <button type="button" class="danger-button compact" (click)="openUserAction(user, 'delete')">Delete</button>
                       </td>
                     </tr>
                   } @empty {
-                    <tr><td colspan="5" class="muted">No users found.</td></tr>
+                    <tr><td colspan="6" class="muted">No users found.</td></tr>
                   }
                 </tbody>
               </table>
@@ -129,6 +184,35 @@ import type { ManagedUser } from './users.service';
             <footer>
               <button type="button" class="secondary" (click)="closeModal()">Cancel</button>
               <button type="submit" [disabled]="userForm.invalid">Create user</button>
+            </footer>
+          </form>
+        </section>
+      }
+
+      @if (userActionCandidate(); as user) {
+        <section class="modal-backdrop" role="dialog" aria-modal="true" aria-label="User action">
+          <form class="modal-panel" [formGroup]="userPasswordForm" (ngSubmit)="confirmUserAction()">
+            <header>
+              <div>
+                <h2>{{ userActionTitle() }}</h2>
+                <p class="muted">{{ userActionDescription(user) }}</p>
+              </div>
+              <button type="button" class="icon-button" (click)="closeUserAction()">x</button>
+            </header>
+            @if (userAction() === 'password') {
+              <div class="modal-grid">
+                <label>New password<input type="password" formControlName="password" autocomplete="new-password" /></label>
+              </div>
+            }
+            <footer>
+              <button type="button" class="secondary" (click)="closeUserAction()">Cancel</button>
+              <button
+                type="submit"
+                [class.danger]="userAction() === 'delete' || userAction() === 'disable'"
+                [disabled]="userActionSaving() || (userAction() === 'password' && userPasswordForm.invalid)"
+              >
+                {{ userActionSaving() ? 'Working...' : userActionConfirmLabel() }}
+              </button>
             </footer>
           </form>
         </section>
@@ -200,10 +284,27 @@ import type { ManagedUser } from './users.service';
                         <dt>Deployment path</dt>
                         <dd>{{ server.installationDirectory }}</dd>
                       </div>
+                      <div class="path-cell">
+                        <dt>Executable</dt>
+                        <dd>{{ server.executablePath }}</dd>
+                      </div>
+                      <div class="path-cell">
+                        <dt>Config file</dt>
+                        <dd>{{ server.configurationFilePath }}</dd>
+                      </div>
+                      <div class="path-cell">
+                        <dt>Save folder</dt>
+                        <dd>{{ server.saveDirectory }}</dd>
+                      </div>
+                      <div class="path-cell">
+                        <dt>Backup folder</dt>
+                        <dd>{{ server.backupDirectory }}</dd>
+                      </div>
                     </dl>
                   </div>
                   <div class="server-instance-actions">
-                    <button type="button" class="secondary" (click)="browseFiles(server)">Browse files</button>
+                    <button type="button" class="secondary" (click)="browseFiles(server)">Open install folder</button>
+                    <button type="button" class="secondary" (click)="openServerConfiguration(server)">Configure</button>
                     <button type="button" class="danger" (click)="deleteServer(server)">Delete</button>
                   </div>
                 </article>
@@ -219,16 +320,75 @@ import type { ManagedUser } from './users.service';
         <summary>
           <span>
             <strong>Automation and Backups</strong>
-            <small>Configure scheduled backups and maintenance automation.</small>
+            <small>Configure safety backup policies for maintenance actions.</small>
           </span>
-          <span class="state-badge">planned</span>
+          <span class="state-badge">{{ backupPolicyCount() }} policies</span>
         </summary>
         <div class="settings-section-body">
-          <label class="setting-toggle">
-            <input type="checkbox" disabled />
-            <span>Scheduled backups</span>
-          </label>
-          <p class="muted">Manual backup and restore live in Server Control. Scheduling controls will land with the automation pass.</p>
+          <div class="warning-panel network-warning-panel">
+            <strong>Scheduled backups run while Palwarden is open.</strong>
+            <p>Each enabled server gets its own interval. Retention only removes older scheduled backup archives; manual and safety backups stay untouched.</p>
+          </div>
+          @if (servers().length) {
+            <div class="automation-server-list">
+              @for (server of servers(); track server.id) {
+                <article class="automation-server-card">
+                  <header>
+                    <div>
+                      <h3>{{ server.displayName }}</h3>
+                      <p class="muted">{{ server.backupDirectory }}</p>
+                    </div>
+                    <span class="state-badge">{{ enabledBackupPolicyCount(server) }}/3 enabled</span>
+                  </header>
+                  <div class="automation-toggle-grid">
+                    <label class="setting-toggle">
+                      <input type="checkbox" [checked]="server.scheduledBackupsEnabled" (change)="toggleScheduledBackups(server, checked($event))" />
+                      <span>
+                        <strong>Scheduled backups</strong>
+                        <small>{{ scheduledBackupSummary(server) }}</small>
+                      </span>
+                    </label>
+                    <label class="automation-number-field">
+                      Interval minutes
+                      <small>1 minute to 7 days</small>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10080"
+                        [value]="server.scheduledBackupIntervalMinutes"
+                        (change)="updateScheduledNumber(server, 'scheduledBackupIntervalMinutes', numberValue($event))"
+                      />
+                    </label>
+                    <label class="automation-number-field">
+                      Keep latest
+                      <small>Scheduled backups only</small>
+                      <input
+                        type="number"
+                        min="1"
+                        max="200"
+                        [value]="server.scheduledBackupRetentionCount"
+                        (change)="updateScheduledNumber(server, 'scheduledBackupRetentionCount', numberValue($event))"
+                      />
+                    </label>
+                    <label class="setting-toggle">
+                      <input type="checkbox" [checked]="server.backupBeforeRestart" (change)="toggleBackupPolicy(server, 'backupBeforeRestart', checked($event))" />
+                      <span>Before restart</span>
+                    </label>
+                    <label class="setting-toggle">
+                      <input type="checkbox" [checked]="server.backupBeforeUpdate" (change)="toggleBackupPolicy(server, 'backupBeforeUpdate', checked($event))" />
+                      <span>Before update</span>
+                    </label>
+                    <label class="setting-toggle">
+                      <input type="checkbox" [checked]="server.backupBeforeConfigChange" (change)="toggleBackupPolicy(server, 'backupBeforeConfigChange', checked($event))" />
+                      <span>Before config change</span>
+                    </label>
+                  </div>
+                </article>
+              }
+            </div>
+          } @else {
+            <p class="muted">Add or import a server before configuring backup policies.</p>
+          }
         </div>
       </details>
 
@@ -355,12 +515,19 @@ import type { ManagedUser } from './users.service';
               <p>Palwarden only controls the bind address and port. For internet access, use HTTPS and a secure network path. Do not expose Palworld REST API ports directly.</p>
             </div>
 
+            @if (hostNetwork()?.restartRequired) {
+              <div class="warning-panel restart-required-panel">
+                <strong>Restart Palwarden to apply this network change.</strong>
+                <p>The saved bind address or port will be used the next time Palwarden starts. Close the desktop app fully, then open Palwarden again from the shortcut or Start Menu.</p>
+              </div>
+            }
+
             <footer class="settings-actions">
               <button class="primary-button" type="submit" [disabled]="currentRole() !== 'OWNER' || networkForm.invalid || networkSaving()">
                 {{ networkSaving() ? 'Saving...' : 'Save network access' }}
               </button>
               @if (hostNetwork()?.restartRequired) {
-                <button class="secondary-button" type="button" (click)="explainNetworkRestart()">Restart required</button>
+                <button class="secondary-button" type="button" (click)="explainNetworkRestart()">Show restart instructions</button>
               }
             </footer>
           </form>
@@ -539,6 +706,9 @@ export class SettingsPage {
   readonly servers = signal<ServerDashboardCard[]>([]);
   readonly users = signal<ManagedUser[]>([]);
   readonly modal = signal<'deploy' | 'import' | 'user' | null>(null);
+  readonly userAction = signal<'enable' | 'disable' | 'delete' | 'password' | null>(null);
+  readonly userActionCandidate = signal<ManagedUser | null>(null);
+  readonly userActionSaving = signal(false);
   readonly message = signal('');
   readonly deploying = signal(false);
   readonly deployLog = signal<string[]>([]);
@@ -548,7 +718,12 @@ export class SettingsPage {
   readonly nexusState = signal<NexusConnectionState | null>(null);
   readonly nexusSaving = signal(false);
   readonly hostNetwork = signal<HostNetworkSettings | null>(null);
+  readonly hostStartup = signal<HostStartupSettings | null>(null);
+  readonly serverStartup = signal<HostServerStartupSettings | null>(null);
   readonly networkSaving = signal(false);
+  readonly startupSaving = signal(false);
+  readonly serverStartupSaving = signal(false);
+  readonly startupServerSavingId = signal<string | null>(null);
   readonly deleteServerCandidate = signal<ServerDashboardCard | null>(null);
   readonly deleteServerFiles = signal(false);
   readonly deletingServer = signal(false);
@@ -590,6 +765,10 @@ export class SettingsPage {
     role: ['ADMIN' as UserRole, Validators.required],
   });
 
+  readonly userPasswordForm = this.fb.nonNullable.group({
+    password: ['', [Validators.required, Validators.minLength(12)]],
+  });
+
   readonly nexusForm = this.fb.nonNullable.group({
     apiKey: ['', Validators.required],
   });
@@ -605,6 +784,8 @@ export class SettingsPage {
     this.refreshUsers();
     this.refreshNexusState();
     this.refreshHostNetworkSettings();
+    this.refreshHostStartupSettings();
+    this.refreshHostServerStartupSettings();
   }
 
   openDeployModal(): void {
@@ -643,6 +824,19 @@ export class SettingsPage {
     if (this.deployTimer) {
       window.clearInterval(this.deployTimer);
     }
+  }
+
+  openUserAction(user: ManagedUser, action: 'enable' | 'disable' | 'delete' | 'password'): void {
+    this.userAction.set(action);
+    this.userActionCandidate.set(user);
+    this.userPasswordForm.reset({ password: '' });
+  }
+
+  closeUserAction(): void {
+    if (this.userActionSaving()) return;
+    this.userAction.set(null);
+    this.userActionCandidate.set(null);
+    this.userPasswordForm.reset({ password: '' });
   }
 
   private showMessage(message: string, durationMs = 3600): void {
@@ -684,6 +878,9 @@ export class SettingsPage {
         backupBeforeRestart: false,
         backupBeforeUpdate: false,
         backupBeforeConfigChange: false,
+        scheduledBackupsEnabled: false,
+        scheduledBackupIntervalMinutes: 360,
+        scheduledBackupRetentionCount: 10,
         forceStopAfterGracefulTimeout: false,
         startAfterInstall: raw.startAfterInstall,
         ...(raw.adminPassword ? { adminPassword: raw.adminPassword } : {}),
@@ -718,6 +915,9 @@ export class SettingsPage {
       backupBeforeRestart: false,
       backupBeforeUpdate: false,
       backupBeforeConfigChange: false,
+      scheduledBackupsEnabled: false,
+      scheduledBackupIntervalMinutes: 360,
+      scheduledBackupRetentionCount: 10,
       forceStopAfterGracefulTimeout: false,
     };
     this.serversService.create(payload).subscribe({
@@ -807,41 +1007,51 @@ export class SettingsPage {
     });
   }
 
-  toggleUserDisabled(user: ManagedUser): void {
-    const action = user.disabled ? 'enable' : 'disable';
-    if (!confirm(`Are you sure you want to ${action} ${user.username}?`)) return;
-    this.usersClient.update(user.id, { disabled: !user.disabled }).subscribe({
-      next: () => {
-        this.showMessage(`User ${user.disabled ? 'enabled' : 'disabled'}.`);
-        this.refreshUsers();
-      },
-      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? `Could not ${action} user.`),
-    });
-  }
-
-  resetUserPassword(user: ManagedUser): void {
-    const password = prompt(`Enter a new password for ${user.username}. Minimum 12 characters.`);
-    if (!password) return;
-    if (password.length < 12) {
-      this.showMessage('Password must be at least 12 characters.');
+  confirmUserAction(): void {
+    const user = this.userActionCandidate();
+    const action = this.userAction();
+    if (!user || !action || this.userActionSaving()) return;
+    if (action === 'password' && this.userPasswordForm.invalid) return;
+    this.userActionSaving.set(true);
+    if (action === 'delete') {
+      this.usersClient.remove(user.id).subscribe({
+        next: () => this.finishUserAction('User deleted.'),
+        error: (error: { error?: { message?: string } }) => this.failUserAction(error.error?.message ?? 'Could not delete user.'),
+      });
       return;
     }
-    this.usersClient.update(user.id, { password }).subscribe({
-      next: () => this.showMessage('Password updated.'),
-      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? 'Could not update password.'),
+    const payload =
+      action === 'password'
+        ? { password: this.userPasswordForm.controls.password.value }
+        : { disabled: action === 'disable' };
+    this.usersClient.update(user.id, payload).subscribe({
+      next: () => this.finishUserAction(action === 'password' ? 'Password updated.' : `User ${action === 'disable' ? 'disabled' : 'enabled'}.`),
+      error: (error: { error?: { message?: string } }) => this.failUserAction(error.error?.message ?? 'Could not update user.'),
     });
   }
 
-  deleteUser(user: ManagedUser): void {
-    const expected = `DELETE ${user.username}`;
-    if (prompt(`Type "${expected}" to delete this Palwarden user.`) !== expected) return;
-    this.usersClient.remove(user.id).subscribe({
-      next: () => {
-        this.showMessage('User deleted.');
-        this.refreshUsers();
-      },
-      error: (error: { error?: { message?: string } }) => this.showMessage(error.error?.message ?? 'Could not delete user.'),
-    });
+  userActionTitle(): string {
+    const action = this.userAction();
+    if (action === 'password') return 'Reset Password';
+    if (action === 'delete') return 'Delete User';
+    if (action === 'disable') return 'Disable User';
+    return 'Enable User';
+  }
+
+  userActionConfirmLabel(): string {
+    const action = this.userAction();
+    if (action === 'password') return 'Update Password';
+    if (action === 'delete') return 'Delete User';
+    if (action === 'disable') return 'Disable User';
+    return 'Enable User';
+  }
+
+  userActionDescription(user: ManagedUser): string {
+    const action = this.userAction();
+    if (action === 'password') return `Set a new Palwarden login password for ${user.username}.`;
+    if (action === 'delete') return `Remove ${user.username} from Palwarden. This cannot be undone.`;
+    if (action === 'disable') return `Prevent ${user.username} from logging in and clear active sessions.`;
+    return `Allow ${user.username} to log in again.`;
   }
 
   saveNexusKey(): void {
@@ -893,7 +1103,7 @@ export class SettingsPage {
           this.networkSaving.set(false);
           this.hostNetwork.set(settings);
           this.patchNetworkForm(settings);
-          this.showMessage(settings.restartRequired ? 'Network access saved. Restart Palwarden to apply it.' : 'Network access saved.');
+          this.showMessage(settings.restartRequired ? 'Network access saved. A Palwarden restart is required before it takes effect.' : 'Network access saved.');
         },
         error: (error: { error?: { message?: string } }) => {
           this.networkSaving.set(false);
@@ -902,10 +1112,118 @@ export class SettingsPage {
       });
   }
 
+  saveStartupSettings(startWithWindows: boolean): void {
+    if (this.startupSaving()) return;
+    this.startupSaving.set(true);
+    this.serversService.saveHostStartupSettings({ startWithWindows }).subscribe({
+      next: (settings) => {
+        this.startupSaving.set(false);
+        this.hostStartup.set(settings);
+        this.showMessage(startWithWindows ? 'Palwarden will start when this Windows user logs in.' : 'Windows startup disabled.');
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.startupSaving.set(false);
+        this.showMessage(error.error?.message ?? 'Could not update Windows startup.');
+        this.refreshHostStartupSettings();
+      },
+    });
+  }
+
+  saveServerStartupSettings(startServersOnLaunch: boolean): void {
+    if (this.serverStartupSaving()) return;
+    this.serverStartupSaving.set(true);
+    this.serversService.saveHostServerStartupSettings({ startServersOnLaunch }).subscribe({
+      next: (settings) => {
+        this.serverStartupSaving.set(false);
+        this.serverStartup.set(settings);
+        this.showMessage(startServersOnLaunch ? 'Selected servers will start with Palwarden.' : 'Server autostart policy disabled.');
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.serverStartupSaving.set(false);
+        this.showMessage(error.error?.message ?? 'Could not update server startup policy.');
+        this.refreshHostServerStartupSettings();
+      },
+    });
+  }
+
+  toggleServerAutoStart(server: ServerDashboardCard, autoStart: boolean): void {
+    if (this.startupServerSavingId()) return;
+    this.startupServerSavingId.set(server.id);
+    this.serversService.update(server.id, this.serverPayloadFromCard(server, autoStart)).subscribe({
+      next: () => {
+        this.startupServerSavingId.set(null);
+        this.showMessage(autoStart ? `${server.displayName} selected for launch-time start.` : `${server.displayName} set to manual start.`);
+        this.refreshServers();
+        this.refreshHostServerStartupSettings();
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.startupServerSavingId.set(null);
+        this.showMessage(error.error?.message ?? 'Could not update server startup selection.');
+        this.refreshServers();
+      },
+    });
+  }
+
   browseFiles(server: ServerDashboardCard): void {
     this.serversService.openFolder(server.id).subscribe({
       next: () => this.showMessage(`Opened files for ${server.displayName}.`),
       error: () => this.showMessage('Could not open that server folder.'),
+    });
+  }
+
+  openServerConfiguration(server: ServerDashboardCard): void {
+    storeSelectedServerId(server.id);
+    void this.router.navigate(['/server-configuration'], { queryParams: { server: server.id } });
+  }
+
+  toggleBackupPolicy(
+    server: ServerDashboardCard,
+    key: 'backupBeforeRestart' | 'backupBeforeUpdate' | 'backupBeforeConfigChange',
+    value: boolean,
+  ): void {
+    this.serversService.update(server.id, this.serverPayloadFromCard(server, server.autoStart, { [key]: value })).subscribe({
+      next: () => {
+        this.showMessage('Backup policy updated.');
+        this.refreshServers();
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.showMessage(error.error?.message ?? 'Could not update backup policy.');
+        this.refreshServers();
+      },
+    });
+  }
+
+  toggleScheduledBackups(server: ServerDashboardCard, enabled: boolean): void {
+    this.serversService.update(server.id, this.serverPayloadFromCard(server, server.autoStart, { scheduledBackupsEnabled: enabled })).subscribe({
+      next: () => {
+        this.showMessage(enabled ? 'Scheduled backups enabled.' : 'Scheduled backups disabled.');
+        this.refreshServers();
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.showMessage(error.error?.message ?? 'Could not update scheduled backups.');
+        this.refreshServers();
+      },
+    });
+  }
+
+  updateScheduledNumber(
+    server: ServerDashboardCard,
+    key: 'scheduledBackupIntervalMinutes' | 'scheduledBackupRetentionCount',
+    value: number,
+  ): void {
+    if (!Number.isInteger(value)) return;
+    const min = key === 'scheduledBackupIntervalMinutes' ? 1 : 1;
+    const max = key === 'scheduledBackupIntervalMinutes' ? 10080 : 200;
+    const cleaned = Math.min(Math.max(value, min), max);
+    this.serversService.update(server.id, this.serverPayloadFromCard(server, server.autoStart, { [key]: cleaned })).subscribe({
+      next: () => {
+        this.showMessage('Scheduled backup setting updated.');
+        this.refreshServers();
+      },
+      error: (error: { error?: { message?: string } }) => {
+        this.showMessage(error.error?.message ?? 'Could not update scheduled backup setting.');
+        this.refreshServers();
+      },
     });
   }
 
@@ -967,6 +1285,24 @@ export class SettingsPage {
     return (event.target as HTMLInputElement).checked;
   }
 
+  numberValue(event: Event): number {
+    return Number((event.target as HTMLInputElement).value);
+  }
+
+  backupPolicyCount(): number {
+    return this.servers().reduce((total, server) => total + this.enabledBackupPolicyCount(server), 0);
+  }
+
+  enabledBackupPolicyCount(server: ServerDashboardCard): number {
+    return [server.backupBeforeRestart, server.backupBeforeUpdate, server.backupBeforeConfigChange].filter(Boolean).length;
+  }
+
+  scheduledBackupSummary(server: ServerDashboardCard): string {
+    if (!server.scheduledBackupsEnabled) return 'Disabled';
+    const next = server.scheduledBackupNextRunAt ? new Date(server.scheduledBackupNextRunAt).toLocaleString() : 'soon';
+    return `Every ${server.scheduledBackupIntervalMinutes} min; next ${next}`;
+  }
+
   private refreshServers(): void {
     this.serversService.dashboard().subscribe((servers) => this.servers.set(servers));
   }
@@ -999,8 +1335,22 @@ export class SettingsPage {
     });
   }
 
+  private refreshHostStartupSettings(): void {
+    this.serversService.hostStartupSettings().subscribe({
+      next: (settings) => this.hostStartup.set(settings),
+      error: () => this.hostStartup.set(null),
+    });
+  }
+
+  private refreshHostServerStartupSettings(): void {
+    this.serversService.hostServerStartupSettings().subscribe({
+      next: (settings) => this.serverStartup.set(settings),
+      error: () => this.serverStartup.set(null),
+    });
+  }
+
   explainNetworkRestart(): void {
-    this.showMessage('Restart Palwarden from the desktop app or shortcut to apply the saved network binding. Automatic restart is still on the v1 todo list.');
+    this.showMessage('Close Palwarden fully, then open it again from the desktop shortcut or Start Menu to apply the saved network binding.');
   }
 
   private patchNetworkForm(settings: HostNetworkSettings): void {
@@ -1009,6 +1359,59 @@ export class SettingsPage {
       port: settings.port,
       acknowledgeExposure: settings.webAccessMode === 'lan',
     });
+  }
+
+  private finishUserAction(message: string): void {
+    this.userActionSaving.set(false);
+    this.closeUserAction();
+    this.showMessage(message);
+    this.refreshUsers();
+  }
+
+  private failUserAction(message: string): void {
+    this.userActionSaving.set(false);
+    this.showMessage(message);
+  }
+
+  private serverPayloadFromCard(
+    server: ServerDashboardCard,
+    autoStart: boolean,
+    overrides: Partial<
+      Pick<
+        ServerPayload,
+        | 'backupBeforeRestart'
+        | 'backupBeforeUpdate'
+        | 'backupBeforeConfigChange'
+        | 'scheduledBackupsEnabled'
+        | 'scheduledBackupIntervalMinutes'
+        | 'scheduledBackupRetentionCount'
+      >
+    > = {},
+  ): ServerPayload {
+    return {
+      displayName: server.displayName,
+      ...(server.description ? { description: server.description } : {}),
+      installationDirectory: server.installationDirectory,
+      executablePath: server.executablePath,
+      workingDirectory: server.workingDirectory,
+      configurationFilePath: server.configurationFilePath,
+      saveDirectory: server.saveDirectory,
+      backupDirectory: server.backupDirectory,
+      restApiHost: server.restApiHost,
+      restApiPort: server.restApiPort,
+      gamePort: server.gamePort,
+      queryPort: server.queryPort,
+      launchArguments: server.launchArguments,
+      autoStart,
+      autoRestart: server.autoRestart,
+      backupBeforeRestart: overrides.backupBeforeRestart ?? server.backupBeforeRestart,
+      backupBeforeUpdate: overrides.backupBeforeUpdate ?? server.backupBeforeUpdate,
+      backupBeforeConfigChange: overrides.backupBeforeConfigChange ?? server.backupBeforeConfigChange,
+      scheduledBackupsEnabled: overrides.scheduledBackupsEnabled ?? server.scheduledBackupsEnabled,
+      scheduledBackupIntervalMinutes: overrides.scheduledBackupIntervalMinutes ?? server.scheduledBackupIntervalMinutes,
+      scheduledBackupRetentionCount: overrides.scheduledBackupRetentionCount ?? server.scheduledBackupRetentionCount,
+      forceStopAfterGracefulTimeout: server.forceStopAfterGracefulTimeout,
+    };
   }
 
   private watchDeployJob(job: DeployJob): void {

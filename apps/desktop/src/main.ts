@@ -104,6 +104,7 @@ function startBackend(): void {
       PALWARDEN_PORT: port,
       PALWARDEN_DESKTOP: 'true',
       PALWARDEN_DESKTOP_TOKEN: desktopToken,
+      PALWARDEN_DESKTOP_EXE: process.execPath,
     },
     stdio: 'ignore',
     windowsHide: true,

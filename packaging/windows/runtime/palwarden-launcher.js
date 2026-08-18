@@ -56,6 +56,9 @@ const config = {
   PALWARDEN_MASTER_KEY: existing.PALWARDEN_MASTER_KEY || randomBytes(32).toString('base64'),
   PALWARDEN_DATA_DIR: dataRoot,
   PALWARDEN_WEB_DIST: webRoot,
+  PALWARDEN_START_SERVERS_ON_LAUNCH: existing.PALWARDEN_START_SERVERS_ON_LAUNCH || 'false',
+  PALWARDEN_START_WITH_WINDOWS: existing.PALWARDEN_START_WITH_WINDOWS || 'false',
+  PALWARDEN_DESKTOP_EXE: existing.PALWARDEN_DESKTOP_EXE || process.env.PALWARDEN_DESKTOP_EXE || '',
 };
 
 writeEnvFile(configPath, config);

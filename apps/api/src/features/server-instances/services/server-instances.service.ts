@@ -167,9 +167,12 @@ export class ServerInstancesService {
         try {
           const client = this.palworld.forInstance(instance, this.decryptPassword(instance));
           const [info, metrics] = await Promise.all([client.info(), client.metrics()]);
+          const runtimeState = runtime.state === 'stopped' || runtime.state === 'unknown' || runtime.state === 'failed' ? 'running' : runtime.state;
           return {
             ...this.toView(instance),
-            runtimeState: runtime.state,
+            runtimeState,
+            localProcessState: runtime.state,
+            localProcessPid: runtime.pid ?? null,
             restConnectivity: 'online',
             currentPlayers: metrics.currentplayernum,
             maxPlayers: metrics.maxplayernum,
@@ -190,6 +193,8 @@ export class ServerInstancesService {
           return {
             ...this.toView(instance),
             runtimeState: runtime.state,
+            localProcessState: runtime.state,
+            localProcessPid: runtime.pid ?? null,
             restConnectivity: runtime.state === 'starting' ? 'starting' : 'offline',
             currentPlayers: null,
             maxPlayers: configuredMaxPlayers,
@@ -2405,6 +2410,10 @@ export class ServerInstancesService {
       backupBeforeRestart: dto.backupBeforeRestart,
       backupBeforeUpdate: dto.backupBeforeUpdate,
       backupBeforeConfigChange: dto.backupBeforeConfigChange,
+      scheduledBackupsEnabled: dto.scheduledBackupsEnabled,
+      scheduledBackupIntervalMinutes: dto.scheduledBackupIntervalMinutes,
+      scheduledBackupRetentionCount: dto.scheduledBackupRetentionCount,
+      scheduledBackupNextRunAt: dto.scheduledBackupsEnabled ? new Date(Date.now() + dto.scheduledBackupIntervalMinutes * 60_000) : null,
       forceStopAfterGracefulTimeout: dto.forceStopAfterGracefulTimeout,
     };
   }
@@ -2430,6 +2439,11 @@ export class ServerInstancesService {
       backupBeforeRestart: instance.backupBeforeRestart,
       backupBeforeUpdate: instance.backupBeforeUpdate,
       backupBeforeConfigChange: instance.backupBeforeConfigChange,
+      scheduledBackupsEnabled: instance.scheduledBackupsEnabled,
+      scheduledBackupIntervalMinutes: instance.scheduledBackupIntervalMinutes,
+      scheduledBackupRetentionCount: instance.scheduledBackupRetentionCount,
+      scheduledBackupNextRunAt: instance.scheduledBackupNextRunAt?.toISOString() ?? null,
+      lastScheduledBackupAt: instance.lastScheduledBackupAt?.toISOString() ?? null,
       forceStopAfterGracefulTimeout: instance.forceStopAfterGracefulTimeout,
       adminPasswordConfigured: Boolean(instance.encryptedAdminPassword),
       createdAt: instance.createdAt.toISOString(),
@@ -2499,6 +2513,9 @@ export class ServerInstancesService {
         backupBeforeRestart: dto.backupBeforeRestart,
         backupBeforeUpdate: dto.backupBeforeUpdate,
         backupBeforeConfigChange: dto.backupBeforeConfigChange,
+        scheduledBackupsEnabled: dto.scheduledBackupsEnabled,
+        scheduledBackupIntervalMinutes: dto.scheduledBackupIntervalMinutes,
+        scheduledBackupRetentionCount: dto.scheduledBackupRetentionCount,
         forceStopAfterGracefulTimeout: dto.forceStopAfterGracefulTimeout,
       };
       if (dto.description !== undefined) {

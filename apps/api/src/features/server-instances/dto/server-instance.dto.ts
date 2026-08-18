@@ -78,6 +78,19 @@ export class UpsertServerInstanceDto {
   backupBeforeConfigChange = false;
 
   @IsBoolean()
+  scheduledBackupsEnabled = false;
+
+  @IsInt()
+  @Min(1)
+  @Max(10080)
+  scheduledBackupIntervalMinutes = 360;
+
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  scheduledBackupRetentionCount = 10;
+
+  @IsBoolean()
   forceStopAfterGracefulTimeout = false;
 }
 
@@ -143,6 +156,19 @@ export class DeployServerInstanceDto {
 
   @IsBoolean()
   backupBeforeConfigChange = false;
+
+  @IsBoolean()
+  scheduledBackupsEnabled = false;
+
+  @IsInt()
+  @Min(1)
+  @Max(10080)
+  scheduledBackupIntervalMinutes = 360;
+
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  scheduledBackupRetentionCount = 10;
 
   @IsBoolean()
   forceStopAfterGracefulTimeout = false;

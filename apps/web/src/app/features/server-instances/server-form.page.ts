@@ -1,4 +1,4 @@
-import type { OnDestroy, OnInit} from '@angular/core';
+import type { OnDestroy, OnInit } from '@angular/core';
 import { Component, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -133,6 +133,9 @@ export class ServerFormPage implements OnInit, OnDestroy {
     backupBeforeRestart: [false],
     backupBeforeUpdate: [false],
     backupBeforeConfigChange: [false],
+    scheduledBackupsEnabled: [false],
+    scheduledBackupIntervalMinutes: [360],
+    scheduledBackupRetentionCount: [10],
     forceStopAfterGracefulTimeout: [false],
     startAfterInstall: [true],
   });
@@ -232,6 +235,9 @@ export class ServerFormPage implements OnInit, OnDestroy {
         backupBeforeRestart: raw.backupBeforeRestart,
         backupBeforeUpdate: raw.backupBeforeUpdate,
         backupBeforeConfigChange: raw.backupBeforeConfigChange,
+        scheduledBackupsEnabled: raw.scheduledBackupsEnabled,
+        scheduledBackupIntervalMinutes: raw.scheduledBackupIntervalMinutes,
+        scheduledBackupRetentionCount: raw.scheduledBackupRetentionCount,
         forceStopAfterGracefulTimeout: raw.forceStopAfterGracefulTimeout,
         startAfterInstall,
         ...(adminPassword ? { adminPassword } : {}),

@@ -10,6 +10,8 @@ const configSchema = z.object({
   PALWARDEN_MASTER_KEY: z.string().optional(),
   PALWARDEN_DATA_DIR: z.string().optional(),
   PALWARDEN_DEV_AUTO_LOGIN: z.coerce.boolean().default(false),
+  PALWARDEN_START_SERVERS_ON_LAUNCH: z.coerce.boolean().default(false),
+  PALWARDEN_DESKTOP_EXE: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

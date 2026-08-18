@@ -7,6 +7,8 @@ import type {
   NexusModFile,
   NexusModSummary,
   ServerDashboardCard,
+  HostServerStartupSettings,
+  HostStartupSettings,
   HostNetworkSettings,
   ServerImportPreview,
   ServerInstanceView,
@@ -38,6 +40,9 @@ export interface ServerPayload {
   backupBeforeRestart: boolean;
   backupBeforeUpdate: boolean;
   backupBeforeConfigChange: boolean;
+  scheduledBackupsEnabled: boolean;
+  scheduledBackupIntervalMinutes: number;
+  scheduledBackupRetentionCount: number;
   forceStopAfterGracefulTimeout: boolean;
 }
 
@@ -58,6 +63,9 @@ export interface DeployServerPayload {
   backupBeforeRestart: boolean;
   backupBeforeUpdate: boolean;
   backupBeforeConfigChange: boolean;
+  scheduledBackupsEnabled: boolean;
+  scheduledBackupIntervalMinutes: number;
+  scheduledBackupRetentionCount: number;
   forceStopAfterGracefulTimeout: boolean;
   startAfterInstall: boolean;
 }
@@ -147,6 +155,16 @@ export interface BackupRecordView {
   createdAt: string;
 }
 
+export interface BackupJobView {
+  id: string;
+  type: 'restore';
+  status: 'running' | 'done' | 'error';
+  log: string[];
+  error: string | null;
+  backupId: string | null;
+  emergencyBackup: BackupRecordView | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ServerInstancesService {
   private readonly http = inject(HttpClient);
@@ -198,6 +216,22 @@ export class ServerInstancesService {
 
   saveHostNetworkSettings(payload: { webAccessMode: 'localhost' | 'lan'; port?: number; acknowledgeExposure?: boolean }) {
     return this.http.put<HostNetworkSettings>('/api/settings/host/network', payload);
+  }
+
+  hostStartupSettings() {
+    return this.http.get<HostStartupSettings>('/api/settings/host/startup');
+  }
+
+  saveHostStartupSettings(payload: { startWithWindows: boolean }) {
+    return this.http.put<HostStartupSettings>('/api/settings/host/startup', payload);
+  }
+
+  hostServerStartupSettings() {
+    return this.http.get<HostServerStartupSettings>('/api/settings/host/server-startup');
+  }
+
+  saveHostServerStartupSettings(payload: { startServersOnLaunch: boolean }) {
+    return this.http.put<HostServerStartupSettings>('/api/settings/host/server-startup', payload);
   }
 
   detectPublicIp() {
@@ -295,7 +329,11 @@ export class ServerInstancesService {
   }
 
   restoreBackup(id: string, backupId: string) {
-    return this.http.post<{ ok: true; emergencyBackup: BackupRecordView | null }>(`/api/server-instances/${id}/backups/${backupId}/restore`, {});
+    return this.http.post<BackupJobView>(`/api/server-instances/${id}/backups/${backupId}/restore`, {});
+  }
+
+  backupJob(jobId: string) {
+    return this.http.get<BackupJobView>(`/api/server-instances/backup-jobs/${jobId}`);
   }
 
   testConnection(id: string) {
@@ -503,6 +541,9 @@ export class ServerInstancesService {
     params.set('backupBeforeRestart', String(payload.backupBeforeRestart));
     params.set('backupBeforeUpdate', String(payload.backupBeforeUpdate));
     params.set('backupBeforeConfigChange', String(payload.backupBeforeConfigChange));
+    params.set('scheduledBackupsEnabled', String(payload.scheduledBackupsEnabled));
+    params.set('scheduledBackupIntervalMinutes', String(payload.scheduledBackupIntervalMinutes));
+    params.set('scheduledBackupRetentionCount', String(payload.scheduledBackupRetentionCount));
     params.set('forceStopAfterGracefulTimeout', String(payload.forceStopAfterGracefulTimeout));
     params.set('startAfterInstall', String(payload.startAfterInstall));
     return params.toString();

@@ -51,6 +51,19 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
         <a routerLink="/host/launcher-options" routerLinkActive="active">Launcher Options</a>
         <a routerLink="/audit-log" routerLinkActive="active">Audit Log</a>
         <a routerLink="/settings" routerLinkActive="active">Settings</a>
+        <div class="sidebar-footer">
+          <a class="creator-link" href="https://webcrafthouse.com/" target="_blank" rel="noreferrer">
+            <img src="assets/brand/wch_icon_150x150.png" alt="WebCraftHouse" />
+            <span>Created by</span>
+            <strong>WebCraftHouse</strong>
+            <small>Games & Community Tools</small>
+          </a>
+          <div class="sidebar-meta">
+            <span>Palwarden v0.1.0</span>
+          </div>
+          <a class="support-link" href="https://buymeacoffee.com/WebCraftHouse" target="_blank" rel="noreferrer">Buy Me a Coffee</a>
+          <a class="support-link" href="https://webcrafthouse.com/contact/" target="_blank" rel="noreferrer">Support</a>
+        </div>
       </nav>
       <main class="app-main">
         <header class="topbar">
@@ -75,9 +88,9 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
               <span>Players</span>
               <strong>{{ playerCount() }}</strong>
             </div>
-            <div class="status-pill" [class.online]="selectedServer()?.restConnectivity === 'online'">
+            <div class="status-pill" [class.online]="serverStateOnline()">
               <span class="status-light"></span>
-              <strong>{{ selectedServer()?.restConnectivity === 'online' ? 'online' : 'offline' }}</strong>
+              <strong>{{ serverStateLabel() }}</strong>
             </div>
             @if (trustedDesktopSession()) {
               <div class="user-pill">
@@ -125,6 +138,18 @@ export class ShellComponent implements OnInit, OnDestroy {
   });
   readonly pageTitle = computed(() => this.pageCopy().title);
   readonly pageDescription = computed(() => this.pageCopy().description);
+  readonly serverStateOnline = computed(() => {
+    const state = this.selectedServer()?.runtimeState;
+    return state === 'running' || state === 'starting';
+  });
+  readonly serverStateLabel = computed(() => {
+    const state = this.selectedServer()?.runtimeState;
+    if (state === 'running') return 'Server running';
+    if (state === 'starting') return 'Server starting';
+    if (state === 'stopping') return 'Server stopping';
+    if (state === 'failed') return 'Server failed';
+    return 'Server offline';
+  });
 
   ngOnInit(): void {
     this.currentUrl.set(this.router.url);

@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Palwarden desktop shell",
+  "author": "Palwarden",
+  "homepage": "https://github.com/wch-01/Palwarden",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -19,6 +21,7 @@
   "build": {
     "appId": "com.palwarden.desktop",
     "productName": "Palwarden",
+    "copyright": "Copyright © 2026 Palwarden",
     "directories": {
       "output": "../../dist/electron"
     },
@@ -35,6 +38,7 @@
     ],
     "win": {
       "icon": "assets/icon.ico",
+      "publisherName": "Palwarden",
       "target": [
         {
           "target": "nsis",
@@ -45,9 +49,11 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "menuCategory": true,
       "shortcutName": "Palwarden",
       "deleteAppDataOnUninstall": false,
       "differentialPackage": false

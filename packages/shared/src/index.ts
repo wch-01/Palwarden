@@ -36,6 +36,11 @@ export interface ServerInstanceView {
   backupBeforeRestart: boolean;
   backupBeforeUpdate: boolean;
   backupBeforeConfigChange: boolean;
+  scheduledBackupsEnabled: boolean;
+  scheduledBackupIntervalMinutes: number;
+  scheduledBackupRetentionCount: number;
+  scheduledBackupNextRunAt: string | null;
+  lastScheduledBackupAt: string | null;
   forceStopAfterGracefulTimeout: boolean;
   adminPasswordConfigured: boolean;
   createdAt: string;
@@ -44,6 +49,8 @@ export interface ServerInstanceView {
 
 export interface ServerDashboardCard extends ServerInstanceView {
   runtimeState: RuntimeState;
+  localProcessState: RuntimeState;
+  localProcessPid: number | null;
   restConnectivity: 'unknown' | 'online' | 'offline' | 'auth_failed' | 'unsupported' | 'starting';
   currentPlayers: number | null;
   maxPlayers: number | null;
@@ -226,6 +233,19 @@ export interface HostNetworkSettings {
   localUrl: string;
   lanUrl: string | null;
   restartRequired: boolean;
+}
+
+export interface HostStartupSettings {
+  available: boolean;
+  startWithWindows: boolean;
+  registeredCommand: string | null;
+  desiredCommand: string | null;
+  message: string;
+}
+
+export interface HostServerStartupSettings {
+  startServersOnLaunch: boolean;
+  autoStartServerCount: number;
 }
 
 export interface PublicIpDetection {

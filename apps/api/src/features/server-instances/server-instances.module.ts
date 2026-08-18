@@ -11,6 +11,8 @@ import { SteamCmdService } from './services/steamcmd.service';
 import { PalworldSettingsFileService } from './services/palworld-settings-file.service';
 import { BackupsService } from '../backups/backups.service';
 import { AuditLogController } from '../audit-log/audit-log.controller';
+import { ServerStartupService } from './services/server-startup.service';
+import { ScheduledBackupsService } from '../backups/scheduled-backups.service';
 
 @Module({
   imports: [AuthModule],
@@ -25,6 +27,8 @@ import { AuditLogController } from '../audit-log/audit-log.controller';
     SteamCmdService,
     PalworldSettingsFileService,
     BackupsService,
+    ScheduledBackupsService,
+    ServerStartupService,
   ],
 })
 export class ServerInstancesModule {}

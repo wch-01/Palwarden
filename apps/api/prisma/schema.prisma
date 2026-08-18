@@ -87,6 +87,11 @@ model ServerInstance {
   backupBeforeRestart        Boolean  @default(false)
   backupBeforeUpdate         Boolean  @default(false)
   backupBeforeConfigChange   Boolean  @default(false)
+  scheduledBackupsEnabled    Boolean  @default(false)
+  scheduledBackupIntervalMinutes Int   @default(360)
+  scheduledBackupRetentionCount Int    @default(10)
+  scheduledBackupNextRunAt   DateTime?
+  lastScheduledBackupAt      DateTime?
   forceStopAfterGracefulTimeout Boolean @default(false)
   shutdownWaitSeconds        Int      @default(30)
   createdAt                  DateTime @default(now())

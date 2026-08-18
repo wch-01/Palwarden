@@ -10,6 +10,7 @@ coverage/
 /logs/
 apps/api/logs/
 dev-palwarden.log
+.dev-logs/
 .palwarden-data/
 .palwarden-dev.*
 .reference/

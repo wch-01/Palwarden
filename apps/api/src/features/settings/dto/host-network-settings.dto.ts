@@ -14,3 +14,13 @@ export class UpdateHostNetworkSettingsDto {
   @IsBoolean()
   acknowledgeExposure?: boolean;
 }
+
+export class UpdateHostStartupSettingsDto {
+  @IsBoolean()
+  startWithWindows!: boolean;
+}
+
+export class UpdateHostServerStartupSettingsDto {
+  @IsBoolean()
+  startServersOnLaunch!: boolean;
+}

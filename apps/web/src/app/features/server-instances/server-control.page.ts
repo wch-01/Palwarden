@@ -5,7 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { IonButton, IonInput, IonItem, IonTextarea, IonToast } from '@ionic/angular/standalone';
 import type { ServerDashboardCard } from '@palwarden/shared';
 import { ServerInstancesService } from './server-instances.service';
-import type { BackupRecordView, DeployJob, PlayerConnectionInfo, ServerUpdateAvailability } from './server-instances.service';
+import type { BackupJobView, BackupRecordView, DeployJob, PlayerConnectionInfo, ServerUpdateAvailability } from './server-instances.service';
 import { selectServerFromRoute } from './selected-server';
 import { maintenanceProgressView } from './deploy-progress';
 
@@ -18,10 +18,12 @@ import { maintenanceProgressView } from './deploy-progress';
         <article class="panel server-actions-panel">
           <div class="panel-header">
             <h2>{{ item.displayName }}</h2>
-            <span class="state-badge" [class.online]="item.runtimeState === 'running'">{{ item.runtimeState }}</span>
+            <span class="state-badge" [class.online]="item.runtimeState === 'running'">{{ serverStateText(item) }}</span>
           </div>
           <div class="stat-grid">
-            <div><span>REST</span><strong>{{ item.restConnectivity }}</strong></div>
+            <div><span>Palworld API</span><strong>{{ apiStateText(item) }}</strong></div>
+            <div><span>Local Process</span><strong>{{ localProcessText(item) }}</strong></div>
+            <div><span>Process ID</span><strong>{{ item.localProcessPid ?? 'n/a' }}</strong></div>
             <div><span>Players</span><strong>{{ item.currentPlayers ?? 0 }}/{{ item.maxPlayers ?? 0 }}</strong></div>
             <div><span>Server FPS</span><strong>{{ item.serverFps ?? 'n/a' }}</strong></div>
             <div><span>Uptime</span><strong>{{ formatUptime(item.uptimeSeconds) }}</strong></div>
@@ -183,6 +185,12 @@ import { maintenanceProgressView } from './deploy-progress';
           @if (backupMessage()) {
             <p class="inline-message">{{ backupMessage() }}</p>
           }
+          <div class="stat-grid backup-summary-grid">
+            <div><span>Total Backups</span><strong>{{ backups().length }}</strong></div>
+            <div><span>Ready</span><strong>{{ successfulBackupCount() }}</strong></div>
+            <div><span>Failed</span><strong>{{ failedBackupCount() }}</strong></div>
+            <div><span>Latest</span><strong>{{ latestBackupText() }}</strong></div>
+          </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
@@ -286,7 +294,7 @@ import { maintenanceProgressView } from './deploy-progress';
     }
     @if (restoreCandidate(); as backup) {
       <div class="modal-backdrop">
-        <div class="modal-panel">
+        <form class="modal-panel" [formGroup]="restoreConfirmForm" (ngSubmit)="confirmRestoreBackup(backup)">
           <header>
             <div>
               <h2>Restore Backup</h2>
@@ -301,9 +309,57 @@ import { maintenanceProgressView } from './deploy-progress';
             <div><dt>File</dt><dd class="path-cell">{{ backup.filePath }}</dd></div>
           </dl>
           <p class="error-text">The server must stay stopped. Palwarden will create an emergency backup of the current save folder before restoring this backup.</p>
+          <label class="modal-wide">
+            Confirmation
+            <input formControlName="confirmation" placeholder="Type RESTORE" />
+          </label>
           <footer>
-            <span class="muted">Type RESTORE in the confirmation box after pressing restore.</span>
-            <button class="danger-button" type="button" (click)="confirmRestoreBackup(backup)">Restore backup</button>
+            <span class="muted">Type RESTORE to unlock the restore action.</span>
+            <button class="danger-button" type="submit" [disabled]="restoreConfirmForm.controls.confirmation.value !== 'RESTORE'">Restore backup</button>
+          </footer>
+        </form>
+      </div>
+    }
+    @if (deleteBackupCandidate(); as backup) {
+      <div class="modal-backdrop">
+        <div class="modal-panel">
+          <header>
+            <div>
+              <h2>Delete Backup</h2>
+              <p class="muted">Remove this backup record and its archive file when it is inside this server's backup folder.</p>
+            </div>
+            <button class="secondary" type="button" (click)="closeDeleteBackupModal()">Close</button>
+          </header>
+          <dl class="restore-preview">
+            <div><dt>Created</dt><dd>{{ formatDate(backup.createdAt) }}</dd></div>
+            <div><dt>Status</dt><dd>{{ backup.success ? 'ready' : 'failed' }}</dd></div>
+            <div><dt>Size</dt><dd>{{ formatBytes(backup.sizeBytes) }}</dd></div>
+            <div><dt>File</dt><dd class="path-cell">{{ backup.filePath }}</dd></div>
+          </dl>
+          @if (backup.failureMessage) {
+            <p class="error-text">{{ backup.failureMessage }}</p>
+          }
+          <footer>
+            <button class="secondary-button" type="button" (click)="closeDeleteBackupModal()">Cancel</button>
+            <button class="danger-button" type="button" (click)="confirmDeleteBackup(backup)">Delete backup</button>
+          </footer>
+        </div>
+      </div>
+    }
+    @if (deleteFailedBackupsOpen()) {
+      <div class="modal-backdrop">
+        <div class="modal-panel">
+          <header>
+            <div>
+              <h2>Delete Failed Backup Records</h2>
+              <p class="muted">Clear failed backup entries from the list. Successful backup archives are not touched.</p>
+            </div>
+            <button class="secondary" type="button" (click)="deleteFailedBackupsOpen.set(false)">Close</button>
+          </header>
+          <p class="muted">{{ failedBackupCount() }} failed backup record{{ failedBackupCount() === 1 ? '' : 's' }} will be removed.</p>
+          <footer>
+            <button class="secondary-button" type="button" (click)="deleteFailedBackupsOpen.set(false)">Cancel</button>
+            <button class="danger-button" type="button" (click)="confirmDeleteFailedBackups()">Delete failed records</button>
           </footer>
         </div>
       </div>
@@ -366,6 +422,8 @@ export class ServerControlPage implements OnDestroy {
   readonly pendingUpdatePayload = signal<{ broadcastMessage?: string; shutdownWaitSeconds?: number } | null>(null);
   readonly shutdownConfirmOpen = signal(false);
   readonly restoreCandidate = signal<BackupRecordView | null>(null);
+  readonly deleteBackupCandidate = signal<BackupRecordView | null>(null);
+  readonly deleteFailedBackupsOpen = signal(false);
   readonly publicIpBusy = signal(false);
   readonly publicIpAddress = signal('');
   readonly publicIpMessage = signal('');
@@ -381,11 +439,15 @@ export class ServerControlPage implements OnDestroy {
     gamePort: [8211, [Validators.required, Validators.min(1), Validators.max(65535)]],
     queryPort: [27015, [Validators.required, Validators.min(1), Validators.max(65535)]],
   });
+  readonly restoreConfirmForm = this.fb.nonNullable.group({
+    confirmation: [''],
+  });
   readonly networkSaving = signal(false);
   private networkLoadedFor: string | null = null;
   private readonly refreshTimer = window.setInterval(() => this.refresh(), 3000);
   private updatePollTimer: number | null = null;
   private actionPollTimer: number | null = null;
+  private backupJobPollTimer: number | null = null;
   private backupsLoadedFor: string | null = null;
   private updateAvailabilityLoadedFor: string | null = null;
   private connectionLoadedFor: string | null = null;
@@ -398,6 +460,7 @@ export class ServerControlPage implements OnDestroy {
     window.clearInterval(this.refreshTimer);
     this.stopUpdatePolling();
     this.stopActionPolling();
+    this.stopBackupJobPolling();
   }
 
   refresh(loadBackups = false): void {
@@ -724,9 +787,19 @@ export class ServerControlPage implements OnDestroy {
   }
 
   deleteBackup(backup: BackupRecordView): void {
+    if (!this.server()) return;
+    this.deleteBackupCandidate.set(backup);
+  }
+
+  closeDeleteBackupModal(): void {
+    this.deleteBackupCandidate.set(null);
+  }
+
+  confirmDeleteBackup(backup: BackupRecordView): void {
     const server = this.server();
-    if (!server || !confirm(`Delete backup from ${this.formatDate(backup.createdAt)}?`)) return;
+    if (!server) return;
     this.service.deleteBackup(server.id, backup.id).subscribe(() => {
+      this.deleteBackupCandidate.set(null);
       this.backupMessage.set('');
       this.showToast('Backup deleted.');
       this.loadBackups(server.id);
@@ -734,10 +807,16 @@ export class ServerControlPage implements OnDestroy {
   }
 
   deleteFailedBackups(): void {
-    const server = this.server();
     const count = this.failedBackupCount();
-    if (!server || count === 0 || !confirm(`Delete ${count} failed backup record${count === 1 ? '' : 's'}?`)) return;
+    if (!this.server() || count === 0) return;
+    this.deleteFailedBackupsOpen.set(true);
+  }
+
+  confirmDeleteFailedBackups(): void {
+    const server = this.server();
+    if (!server) return;
     this.service.deleteFailedBackups(server.id).subscribe((result) => {
+      this.deleteFailedBackupsOpen.set(false);
       this.backupMessage.set('');
       this.showToast(`Deleted ${result.deleted} failed backup record${result.deleted === 1 ? '' : 's'}.`);
       this.loadBackups(server.id);
@@ -751,28 +830,27 @@ export class ServerControlPage implements OnDestroy {
       this.showToast('Stop the server before restoring a backup.', 'danger');
       return;
     }
+    this.restoreConfirmForm.reset({ confirmation: '' });
     this.restoreCandidate.set(backup);
   }
 
   closeRestoreModal(): void {
     this.restoreCandidate.set(null);
+    this.restoreConfirmForm.reset({ confirmation: '' });
   }
 
   confirmRestoreBackup(backup: BackupRecordView): void {
     const server = this.server();
     if (!server) return;
-    const confirmation = prompt(`Restore backup from ${this.formatDate(backup.createdAt)}? Type RESTORE to replace the current save data.`);
-    if (confirmation !== 'RESTORE') return;
+    if (this.restoreConfirmForm.controls.confirmation.value !== 'RESTORE') return;
     this.restoreCandidate.set(null);
+    this.restoreConfirmForm.reset({ confirmation: '' });
     this.backupBusy.set(true);
     this.beginAction('Restoring Backup', 'Creating an emergency backup, clearing the save directory, then expanding the selected backup.');
     this.service.restoreBackup(server.id, backup.id).subscribe({
-      next: (result) => {
-        this.endAction();
-        this.backupMessage.set('');
-        this.showToast(result.emergencyBackup ? 'Backup restored. Emergency backup was created first.' : 'Backup restored.');
-        this.backupBusy.set(false);
-        this.loadBackups(server.id);
+      next: (job) => {
+        this.applyBackupJobProgress(job);
+        this.pollBackupJob(job.id);
       },
       error: (error: { error?: { message?: string } }) => {
         this.endAction();
@@ -844,6 +922,52 @@ export class ServerControlPage implements OnDestroy {
     }
   }
 
+  private pollBackupJob(jobId: string): void {
+    this.stopBackupJobPolling();
+    this.backupJobPollTimer = window.setInterval(() => {
+      this.service.backupJob(jobId).subscribe({
+        next: (job) => {
+          this.applyBackupJobProgress(job);
+          if (job.status !== 'running') {
+            const server = this.server();
+            this.stopBackupJobPolling();
+            this.endAction();
+            this.backupBusy.set(false);
+            this.backupMessage.set('');
+            if (server) {
+              this.loadBackups(server.id);
+            }
+            this.showToast(
+              job.status === 'done'
+                ? job.emergencyBackup
+                  ? 'Backup restored. Emergency backup was created first.'
+                  : 'Backup restored.'
+                : job.error || 'Could not restore backup.',
+              job.status === 'done' ? 'success' : 'danger',
+            );
+          }
+        },
+        error: (error: { error?: { message?: string } }) => {
+          const server = this.server();
+          this.stopBackupJobPolling();
+          this.endAction();
+          this.backupBusy.set(false);
+          this.showToast(error.error?.message ?? 'Could not read restore progress.', 'danger');
+          if (server) {
+            this.loadBackups(server.id);
+          }
+        },
+      });
+    }, 1500);
+  }
+
+  private stopBackupJobPolling(): void {
+    if (this.backupJobPollTimer !== null) {
+      window.clearInterval(this.backupJobPollTimer);
+      this.backupJobPollTimer = null;
+    }
+  }
+
   private beginAction(title: string, message: string): void {
     this.stopActionPolling();
     this.actionTitle.set(title);
@@ -864,6 +988,26 @@ export class ServerControlPage implements OnDestroy {
     this.actionMessage.set(progress.step);
     this.actionDetail.set(progress.detail);
     this.actionProgressPercent.set(progress.percent);
+  }
+
+  private applyBackupJobProgress(job: BackupJobView): void {
+    const latest = job.log.at(-1) ?? 'Restoring backup...';
+    const joined = job.log.join('\n');
+    this.actionTitle.set(job.status === 'error' ? 'Restore Failed' : job.status === 'done' ? 'Restore Complete' : 'Restoring Backup');
+    this.actionMessage.set('Palwarden is restoring the selected backup with an emergency backup first.');
+    this.actionDetail.set(job.status === 'error' ? job.error || latest : latest);
+    this.actionProgressPercent.set(this.restoreProgressPercent(joined, job.status));
+  }
+
+  private restoreProgressPercent(log: string, status: BackupJobView['status']): number | null {
+    if (status === 'done') return 100;
+    if (status === 'error') return null;
+    if (/Expanding selected backup archive/i.test(log)) return 85;
+    if (/Clearing current save directory/i.test(log)) return 70;
+    if (/Creating emergency backup/i.test(log)) return 45;
+    if (/Validating selected backup/i.test(log)) return 25;
+    if (/Checking server state/i.test(log)) return 10;
+    return null;
   }
 
   private patchNetworkForm(server: ServerDashboardCard): void {
@@ -914,8 +1058,39 @@ export class ServerControlPage implements OnDestroy {
     return 'unknown';
   }
 
+  serverStateText(server: ServerDashboardCard): string {
+    if (server.runtimeState === 'running') return 'Server running';
+    if (server.runtimeState === 'starting') return 'Server starting';
+    if (server.runtimeState === 'stopping') return 'Server stopping';
+    if (server.runtimeState === 'failed') return 'Server failed';
+    return 'Server offline';
+  }
+
+  apiStateText(server: ServerDashboardCard): string {
+    if (server.restConnectivity === 'online') return 'online';
+    if (server.restConnectivity === 'auth_failed') return 'password mismatch';
+    if (server.restConnectivity === 'starting') return 'starting';
+    if (server.restConnectivity === 'unsupported') return 'unsupported';
+    return 'offline';
+  }
+
+  localProcessText(server: ServerDashboardCard): string {
+    if (server.localProcessPid) return `detected (${server.localProcessState})`;
+    if (server.restConnectivity === 'online') return 'not detected';
+    return server.localProcessState === 'stopped' ? 'not running' : server.localProcessState;
+  }
+
   failedBackupCount(): number {
     return this.backups().filter((backup) => !backup.success).length;
+  }
+
+  successfulBackupCount(): number {
+    return this.backups().filter((backup) => backup.success).length;
+  }
+
+  latestBackupText(): string {
+    const latest = this.backups()[0];
+    return latest ? this.formatDate(latest.createdAt) : 'none';
   }
 
   formatDate(value: string): string {

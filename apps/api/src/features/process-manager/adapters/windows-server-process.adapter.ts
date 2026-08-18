@@ -8,9 +8,26 @@ import type { RuntimeState } from '@palwarden/shared';
 import type { ServerProcessAdapter, ServerProcessResult, ServerProcessStatus } from '../models/server-process-adapter';
 
 interface TrackedProcess {
+  kind: 'spawned';
   child: ChildProcessWithoutNullStreams;
   startedAt: number;
   state: RuntimeState;
+}
+
+interface RecoveredProcess {
+  kind: 'recovered';
+  pid: number;
+  startedAt: number;
+  state: RuntimeState;
+}
+
+type ManagedProcess = TrackedProcess | RecoveredProcess;
+
+interface WindowsProcessRecord {
+  pid: number;
+  executablePath: string;
+  commandLine: string;
+  creationDate: string;
 }
 
 interface CpuSample {
@@ -47,24 +64,36 @@ export function buildPalServerLaunchArguments(instance: ServerInstance): string[
 
 @Injectable()
 export class WindowsServerProcessAdapter implements ServerProcessAdapter {
-  private readonly processes = new Map<string, TrackedProcess>();
+  private readonly processes = new Map<string, ManagedProcess>();
   private readonly buffers = new Map<string, string[]>();
   private readonly cpuSamples = new Map<number, CpuSample>();
   private readonly cpuWindows = new Map<number, CpuWindow>();
 
   async start(instance: ServerInstance): Promise<ServerProcessResult> {
     const existing = this.processes.get(instance.id);
-    if ((existing && existing.child.exitCode === null) || (await this.findInstanceProcesses(instance)).length) {
+    if (existing?.kind === 'spawned' && this.isManagedProcessActive(existing)) {
+      throw new BadRequestException('This server instance is already running.');
+    }
+    if (existing?.kind === 'recovered') {
+      if (await this.processStillMatchesInstance(instance, existing.pid)) {
+        throw new BadRequestException('This server instance is already running.');
+      }
+      this.processes.delete(instance.id);
+      this.pushLog(instance.id, `Discarded stale recovered process ${existing.pid} before start.`);
+    }
+    if ((await this.findInstanceProcesses(instance)).length) {
       throw new BadRequestException('This server instance is already running.');
     }
     const args = buildPalServerLaunchArguments(instance);
     const executablePath = this.resolveLaunchExecutable(instance);
     const child = spawn(executablePath, args, {
       cwd: instance.workingDirectory,
+      detached: true,
       shell: false,
       windowsHide: true,
     });
-    const tracked: TrackedProcess = { child, startedAt: Date.now(), state: 'starting' };
+    child.unref();
+    const tracked: TrackedProcess = { kind: 'spawned', child, startedAt: Date.now(), state: 'starting' };
     this.processes.set(instance.id, tracked);
     this.pushLog(instance.id, `Started process ${child.pid ?? 'unknown'} with ${executablePath} ${args.join(' ')}.`);
     child.stdout.on('data', (chunk: Buffer) => void this.writeOutput(instance.id, 'stdout', chunk));
@@ -78,7 +107,7 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
 
   requestGracefulStop(instance: ServerInstance): Promise<void> {
     const tracked = this.processes.get(instance.id);
-    if (!tracked || tracked.child.exitCode !== null) {
+    if (!tracked || !this.isManagedProcessActive(tracked)) {
       return Promise.resolve();
     }
     tracked.state = 'stopping';
@@ -88,19 +117,30 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
 
   forceStop(instance: ServerInstance): Promise<void> {
     const tracked = this.processes.get(instance.id);
-    if (!tracked || tracked.child.exitCode !== null) {
+    if (!tracked || !this.isManagedProcessActive(tracked)) {
       return Promise.resolve();
     }
     tracked.state = 'stopping';
-    tracked.child.kill('SIGTERM');
-    this.pushLog(instance.id, 'Force stop requested.');
-    return Promise.resolve();
+    if (tracked.kind === 'spawned') {
+      tracked.child.kill('SIGTERM');
+      this.pushLog(instance.id, 'Force stop requested.');
+      return Promise.resolve();
+    }
+    return this.forceStopRecovered(instance, tracked.pid);
   }
 
   getStatus(instanceId: string): ServerProcessStatus {
     const tracked = this.processes.get(instanceId);
     if (!tracked) {
       return { state: 'stopped', uptimeSeconds: 0 };
+    }
+    if (tracked.kind === 'recovered') {
+      return {
+        state: tracked.state,
+        pid: tracked.pid,
+        uptimeSeconds: Math.floor((Date.now() - tracked.startedAt) / 1000),
+        ...this.hostMetrics(tracked.pid),
+      };
     }
     if (tracked.child.exitCode !== null) {
       return { state: tracked.state, ...(tracked.child.pid ? { pid: tracked.child.pid } : {}), uptimeSeconds: 0 };
@@ -129,17 +169,32 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
   async recoverStatus(instance: ServerInstance): Promise<ServerProcessStatus> {
     const tracked = this.getStatus(instance.id);
     if (tracked.state === 'running' || tracked.state === 'starting' || tracked.state === 'stopping') {
+      if (tracked.pid && !(await this.processStillMatchesInstance(instance, tracked.pid))) {
+        this.processes.delete(instance.id);
+        this.pushLog(instance.id, `Discarded stale recovered process ${tracked.pid}; it no longer matches this server profile.`);
+      } else {
+        return tracked;
+      }
+    }
+    const current = this.processes.get(instance.id);
+    if (current?.kind === 'spawned' && current.child.exitCode !== null) {
       return tracked;
     }
     const processes = await this.findInstanceProcesses(instance);
     if (!processes.length) {
-      return tracked;
+      const stale = this.processes.get(instance.id);
+      if (stale?.kind === 'recovered') {
+        this.processes.delete(instance.id);
+        this.pushLog(instance.id, `Recovered process ${stale.pid} is no longer running.`);
+      }
+      return { state: stale?.state === 'stopping' ? 'stopped' : 'stopped', uptimeSeconds: 0 };
     }
+    const recovered = this.trackRecoveredProcess(instance, processes[0]!);
     return {
-      state: 'running',
-      ...(processes[0] ? { pid: processes[0].pid } : {}),
-      uptimeSeconds: 0,
-      ...(processes[0] ? this.hostMetrics(processes[0].pid) : {}),
+      state: recovered.state,
+      pid: recovered.pid,
+      uptimeSeconds: Math.floor((Date.now() - recovered.startedAt) / 1000),
+      ...this.hostMetrics(recovered.pid),
     };
   }
 
@@ -157,39 +212,174 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
     this.buffers.set(instanceId, lines.slice(-500));
   }
 
-  private async findInstanceProcesses(instance: ServerInstance): Promise<Array<{ pid: number }>> {
-    const script = [
-      '$ErrorActionPreference = "SilentlyContinue"',
-      'Get-CimInstance Win32_Process',
-      '| Where-Object { @("PalServer.exe","PalServer-Win64-Shipping-Cmd.exe") -contains $_.Name }',
-      '| Select-Object ProcessId,ExecutablePath,CommandLine',
-      '| ConvertTo-Json -Compress',
-    ].join(' ');
+  private async findInstanceProcesses(instance: ServerInstance): Promise<WindowsProcessRecord[]> {
+    const getProcessRecords = await this.findInstanceProcessesWithGetProcess();
+    const portRecords = await this.findInstanceProcessesByPorts(instance);
+    const cimRecords = getProcessRecords.length || portRecords.length ? [] : await this.findInstanceProcessesWithCim();
+    const fallbackRecords = this.dedupeProcessRecords([...getProcessRecords, ...portRecords, ...cimRecords]);
+    const root = this.pathKey(instance.installationDirectory);
+    return fallbackRecords
+      .filter((record) => {
+        const name = record.executablePath.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+        if (name && !PALWORLD_PROCESS_NAMES.has(name)) {
+          return false;
+        }
+        return (
+          (record.executablePath ? this.pathIsInside(record.executablePath, root) : false) ||
+          (record.commandLine ? this.commandLineIncludesRoot(record.commandLine, root) : false)
+        );
+      })
+      .filter((record) => record.pid > 0);
+  }
+
+  private async findInstanceProcessesByPorts(instance: ServerInstance): Promise<WindowsProcessRecord[]> {
+    const ports = [instance.restApiPort, instance.gamePort, instance.queryPort]
+      .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535)
+      .join(',');
+    if (!ports) {
+      return [];
+    }
+    const script = `$ports = @(${ports}); $ids = Get-NetTCPConnection -LocalPort $ports -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess -Unique; if ($ids) { Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id,Path,StartTime,ProcessName | ConvertTo-Json -Compress }`;
     const output = await this.runPowerShell(script);
     if (!output.trim()) {
       return [];
     }
-    let records: Array<{ ProcessId?: number; ExecutablePath?: string; CommandLine?: string }> = [];
+    let records: Array<{ Id?: number; Path?: string; StartTime?: string; ProcessName?: string }> = [];
     try {
       const parsed = JSON.parse(output) as unknown;
       records = Array.isArray(parsed) ? records.concat(parsed as typeof records) : [parsed as (typeof records)[number]];
     } catch {
       return [];
     }
-    const root = this.pathKey(instance.installationDirectory);
     return records
-      .filter((record) => {
-        const name = record.ExecutablePath?.split(/[\\/]/).pop()?.toLowerCase() ?? '';
-        if (name && !PALWORLD_PROCESS_NAMES.has(name)) {
-          return false;
-        }
-        return (
-          (record.ExecutablePath ? this.pathIsInside(record.ExecutablePath, root) : false) ||
-          (record.CommandLine ? this.commandLineIncludesRoot(record.CommandLine, root) : false)
-        );
-      })
-      .map((record) => ({ pid: record.ProcessId ?? 0 }))
+      .map((record) => ({
+        pid: record.Id ?? 0,
+        executablePath: record.Path ?? '',
+        commandLine: record.Path ? `"${record.Path}"` : record.ProcessName ?? '',
+        creationDate: record.StartTime ?? '',
+      }))
       .filter((record) => record.pid > 0);
+  }
+
+  private dedupeProcessRecords(records: WindowsProcessRecord[]): WindowsProcessRecord[] {
+    const byPid = new Map<number, WindowsProcessRecord>();
+    for (const record of records) {
+      if (!record.pid) {
+        continue;
+      }
+      const existing = byPid.get(record.pid);
+      if (!existing || (!existing.executablePath && record.executablePath)) {
+        byPid.set(record.pid, record);
+      }
+    }
+    return [...byPid.values()];
+  }
+
+  private async findInstanceProcessesWithCim(): Promise<WindowsProcessRecord[]> {
+    const script = [
+      '$ErrorActionPreference = "SilentlyContinue";',
+      'Get-CimInstance Win32_Process',
+      '| Where-Object { @("PalServer.exe","PalServer-Win64-Shipping-Cmd.exe") -contains $_.Name }',
+      '| Select-Object ProcessId,ExecutablePath,CommandLine,CreationDate',
+      '| ConvertTo-Json -Compress',
+    ].join(' ');
+    const output = await this.runPowerShell(script);
+    if (!output.trim()) {
+      return [];
+    }
+    let records: Array<{ ProcessId?: number; ExecutablePath?: string; CommandLine?: string; CreationDate?: string }> = [];
+    try {
+      const parsed = JSON.parse(output) as unknown;
+      records = Array.isArray(parsed) ? records.concat(parsed as typeof records) : [parsed as (typeof records)[number]];
+    } catch {
+      return [];
+    }
+    return records
+      .map((record) => ({
+        pid: record.ProcessId ?? 0,
+        executablePath: record.ExecutablePath ?? '',
+        commandLine: record.CommandLine ?? '',
+        creationDate: record.CreationDate ?? '',
+      }))
+      .filter((record) => record.pid > 0);
+  }
+
+  private async findInstanceProcessesWithGetProcess(): Promise<WindowsProcessRecord[]> {
+    const script = [
+      '$ErrorActionPreference = "SilentlyContinue";',
+      'Get-Process -Name PalServer,PalServer-Win64-Shipping-Cmd',
+      '| Select-Object Id,Path,StartTime,ProcessName',
+      '| ConvertTo-Json -Compress',
+    ].join(' ');
+    const output = await this.runPowerShell(script);
+    if (!output.trim()) {
+      return [];
+    }
+    let records: Array<{ Id?: number; Path?: string; StartTime?: string; ProcessName?: string }> = [];
+    try {
+      const parsed = JSON.parse(output) as unknown;
+      records = Array.isArray(parsed) ? records.concat(parsed as typeof records) : [parsed as (typeof records)[number]];
+    } catch {
+      return [];
+    }
+    return records
+      .map((record) => ({
+        pid: record.Id ?? 0,
+        executablePath: record.Path ?? '',
+        commandLine: record.Path ? `"${record.Path}"` : record.ProcessName ?? '',
+        creationDate: record.StartTime ?? '',
+      }))
+      .filter((record) => record.pid > 0);
+  }
+
+  private isManagedProcessActive(process: ManagedProcess): boolean {
+    return process.kind === 'recovered' || process.child.exitCode === null;
+  }
+
+  private trackRecoveredProcess(instance: ServerInstance, record: WindowsProcessRecord): RecoveredProcess {
+    const existing = this.processes.get(instance.id);
+    const startedAt = this.parseWindowsCimDate(record.creationDate) ?? (existing?.kind === 'recovered' ? existing.startedAt : Date.now());
+    const state = existing?.state === 'stopping' ? 'stopping' : 'running';
+    const recovered: RecoveredProcess = { kind: 'recovered', pid: record.pid, startedAt, state };
+    this.processes.set(instance.id, recovered);
+    if (existing?.kind !== 'recovered' || existing.pid !== record.pid) {
+      this.pushLog(instance.id, `Recovered running Palworld process ${record.pid} from ${record.executablePath || 'Windows process list'}.`);
+      this.pushLog(instance.id, 'Live stdout/stderr capture is only available for processes launched by Palwarden.');
+    }
+    return recovered;
+  }
+
+  private async processStillMatchesInstance(instance: ServerInstance, pid: number): Promise<boolean> {
+    return (await this.findInstanceProcesses(instance)).some((record) => record.pid === pid);
+  }
+
+  private async forceStopRecovered(instance: ServerInstance, pid: number): Promise<void> {
+    if (!(await this.processStillMatchesInstance(instance, pid))) {
+      this.processes.delete(instance.id);
+      this.pushLog(instance.id, `Force stop skipped because recovered process ${pid} no longer matches this server profile.`);
+      return;
+    }
+    const script = `Stop-Process -Id ${pid} -Force -ErrorAction Stop`;
+    await this.runPowerShell(script);
+    this.pushLog(instance.id, `Force stop requested for recovered process ${pid}.`);
+  }
+
+  private parseWindowsCimDate(value: string): number | null {
+    if (!value) return null;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+    const match = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second] = match;
+    const timestamp = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
   }
 
   private hostMetrics(
@@ -300,7 +490,9 @@ export class WindowsServerProcessAdapter implements ServerProcessAdapter {
   }
 
   private pathIsInside(value: string, root: string): boolean {
-    return this.pathKey(value).startsWith(`${root}\\`) || this.pathKey(value) === root;
+    const key = this.pathKey(value);
+    const normalizedRoot = root.endsWith('\\') ? root : `${root}\\`;
+    return key === root || key.startsWith(normalizedRoot);
   }
 
   private commandLineIncludesRoot(value: string, root: string): boolean {
