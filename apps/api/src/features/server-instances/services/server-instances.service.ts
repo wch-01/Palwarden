@@ -1709,7 +1709,7 @@ export class ServerInstancesService {
       headers: {
         Accept: 'application/json',
         'Application-Name': 'Palwarden',
-        'Application-Version': '0.1.0',
+        'Application-Version': '1.0.0',
         apikey: apiKey,
       },
     }).catch(() => null);
@@ -1738,7 +1738,7 @@ export class ServerInstancesService {
         Accept: 'application/json',
         'Content-Type': 'application/json',
         'Application-Name': 'Palwarden',
-        'Application-Version': '0.1.0',
+        'Application-Version': '1.0.0',
       },
       body: JSON.stringify({ query, variables }),
     }).catch(() => null);
@@ -2163,7 +2163,7 @@ export class ServerInstancesService {
     const response = await fetch('https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/latest', {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'Palwarden/0.1.0',
+        'User-Agent': 'Palwarden/1.0.0',
       },
     }).catch(() => null);
     if (!response) {
@@ -2325,7 +2325,7 @@ export class ServerInstancesService {
       headers: {
         Accept: 'application/json',
         'Application-Name': 'Palwarden',
-        'Application-Version': '0.1.0',
+        'Application-Version': '1.0.0',
         apikey: apiKey,
       },
     }).catch(() => null);

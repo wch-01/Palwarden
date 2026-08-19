@@ -60,7 +60,7 @@ async function bootstrap(): Promise<void> {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Palwarden API')
     .setDescription('Self-hosted Palworld Dedicated Server Controller API')
-    .setVersion('0.1.0')
+    .setVersion('1.0.0')
     .build();
   SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 

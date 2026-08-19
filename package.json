@@ -1,8 +1,9 @@
 {
   "name": "palwarden",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Self-hosted Palworld Dedicated Server Controller",
+  "license": "MIT",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": ">=24.0.0"

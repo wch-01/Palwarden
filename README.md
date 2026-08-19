@@ -31,7 +31,7 @@ pnpm package:electron
 The build creates:
 
 ```text
-dist/electron/Palwarden-0.1.0-windows-x64-installer.exe
+dist/electron/Palwarden-1.0.0-windows-x64-installer.exe
 ```
 
 The Electron app stores its runtime data under the app user-data folder and uses
@@ -185,15 +185,11 @@ pnpm exec playwright test
 ## Known Limitations
 
 - SteamCMD fresh installs, updates, and validation are implemented, but Steam content-server failures can still require retrying later.
-- Manual and scheduled backups can be created, restored, and deleted from Server Control and Settings.
-- Process recovery after Palwarden restarts is implemented for Windows, but stricter identity validation remains a wishlist item.
-- The Windows adapter does not force-kill during normal graceful stop.
 - Nexus mod browsing, direct download, update checks, and admin approval workflows are implemented as an initial working flow and may need broader archive-shape testing across more mods.
-- Some server data, such as guild roster and rich player/base details, depends on future Palworld API support.
 
-## Reference and License
+## License
 
-The behavior reference was `wch-01/PW-Server-Manager` at commit `47f45f6a26e7cbac9e3ec45e150514e6610ac5fe`. It is MIT licensed, copyright 2026 Kvitekvist. Palwarden does not copy its source code. See `docs/reference-analysis.md`.
+Palwarden is released under the MIT License. See `LICENSE`.
 
 Official Palworld REST API documentation is the source of truth for server API behavior.
 

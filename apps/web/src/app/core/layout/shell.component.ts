@@ -59,7 +59,7 @@ const PAGE_COPY: Array<{ pattern: RegExp; title: string; description: string }> 
             <small>Games & Community Tools</small>
           </a>
           <div class="sidebar-meta">
-            <span>Palwarden v0.1.0</span>
+            <span>Palwarden v1.0.0</span>
           </div>
           <a class="support-link" href="https://buymeacoffee.com/WebCraftHouse" target="_blank" rel="noreferrer">Buy Me a Coffee</a>
           <a class="support-link" href="https://webcrafthouse.com/contact/" target="_blank" rel="noreferrer">Support</a>
