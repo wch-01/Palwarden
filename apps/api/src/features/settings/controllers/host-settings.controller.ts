@@ -46,7 +46,11 @@ export class HostSettingsController {
       actorId: req.user.id,
       action: 'SERVER_UPDATED',
       message: 'Host network access settings updated.',
-      metadata: { webAccessMode: result.webAccessMode, port: result.port, restartRequired: result.restartRequired },
+      metadata: {
+        webAccessMode: result.configured.webAccessMode,
+        port: result.configured.port,
+        restartRequired: result.restartRequired,
+      },
     });
     return result;
   }

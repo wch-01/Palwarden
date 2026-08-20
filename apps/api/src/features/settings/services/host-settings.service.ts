@@ -20,16 +20,12 @@ export class HostSettingsService {
     const persisted = this.readEnvFile();
     const activeHost = this.config.get<string>('PALWARDEN_HOST') ?? '127.0.0.1';
     const activePort = Number(this.config.get('PALWARDEN_PORT') ?? 3333);
-    const desiredHost = persisted.PALWARDEN_HOST ?? activeHost;
-    const desiredPort = Number(persisted.PALWARDEN_PORT ?? activePort);
-    const webAccessMode = desiredHost === '0.0.0.0' ? 'lan' : 'localhost';
+    const configuredHost = persisted.PALWARDEN_HOST ?? activeHost;
+    const configuredPort = Number(persisted.PALWARDEN_PORT ?? activePort);
     return {
-      host: desiredHost,
-      port: desiredPort,
-      webAccessMode,
-      localUrl: `http://127.0.0.1:${desiredPort}`,
-      lanUrl: webAccessMode === 'lan' ? `http://<this-pc-lan-ip>:${desiredPort}` : null,
-      restartRequired: desiredHost !== activeHost || desiredPort !== activePort,
+      active: this.networkBinding(activeHost, activePort),
+      configured: this.networkBinding(configuredHost, configuredPort),
+      restartRequired: configuredHost !== activeHost || configuredPort !== activePort,
     };
   }
 
@@ -67,7 +63,7 @@ export class HostSettingsService {
       }
       return {
         publicIp,
-        address: `${publicIp}:${settings.port}`,
+        address: `${publicIp}:${settings.active.port}`,
         message: 'Public IP detected. Router and Windows Firewall port forwarding are still required for public play.',
       };
     } catch {
@@ -223,5 +219,16 @@ export class HostSettingsService {
       return String(value).toLowerCase() === 'true';
     }
     return false;
+  }
+
+  private networkBinding(host: string, port: number): HostNetworkSettings['active'] {
+    const webAccessMode = host === '0.0.0.0' ? 'lan' : 'localhost';
+    return {
+      host,
+      port,
+      webAccessMode,
+      localUrl: `http://127.0.0.1:${port}`,
+      lanUrl: webAccessMode === 'lan' ? `http://<this-pc-lan-ip>:${port}` : null,
+    };
   }
 }

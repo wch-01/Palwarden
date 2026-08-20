@@ -226,12 +226,17 @@ export interface NexusConnectionState {
   updatedAt: string | null;
 }
 
-export interface HostNetworkSettings {
+export interface HostNetworkBinding {
   host: string;
   port: number;
   webAccessMode: 'localhost' | 'lan';
   localUrl: string;
   lanUrl: string | null;
+}
+
+export interface HostNetworkSettings {
+  active: HostNetworkBinding;
+  configured: HostNetworkBinding;
   restartRequired: boolean;
 }
 

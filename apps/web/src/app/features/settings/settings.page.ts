@@ -464,8 +464,8 @@ import type { ManagedUser } from './users.service';
             <strong>Network Access</strong>
             <small>Choose whether Palwarden is local-only or reachable from other trusted machines.</small>
           </span>
-          <span class="state-badge" [class.online]="hostNetwork()?.webAccessMode === 'lan'">
-            {{ hostNetwork()?.webAccessMode === 'lan' ? 'LAN enabled' : 'local only' }}
+          <span class="state-badge" [class.online]="hostNetwork()?.active?.webAccessMode === 'lan'">
+            {{ hostNetwork()?.active?.webAccessMode === 'lan' ? 'LAN active' : 'local only' }}
           </span>
         </summary>
         <div class="settings-section-body">
@@ -495,10 +495,10 @@ import type { ManagedUser } from './users.service';
                 <input type="number" formControlName="port" min="1" max="65535" />
               </label>
               <div class="settings-card compact-card">
-                <h3>Current target</h3>
-                <code>{{ hostNetwork()?.localUrl || 'http://127.0.0.1:3333' }}</code>
-                @if (hostNetwork()?.lanUrl) {
-                  <code>{{ hostNetwork()?.lanUrl }}</code>
+                <h3>Currently listening</h3>
+                <code>{{ hostNetwork()?.active?.localUrl || 'http://127.0.0.1:3333' }}</code>
+                @if (hostNetwork()?.active?.lanUrl) {
+                  <code>{{ hostNetwork()?.active?.lanUrl }}</code>
                 }
               </div>
             </div>
@@ -518,7 +518,11 @@ import type { ManagedUser } from './users.service';
             @if (hostNetwork()?.restartRequired) {
               <div class="warning-panel restart-required-panel">
                 <strong>Restart Palwarden to apply this network change.</strong>
-                <p>The saved bind address or port will be used the next time Palwarden starts. Close the desktop app fully, then open Palwarden again from the shortcut or Start Menu.</p>
+                <p>The saved bind address or port will be used the next time Palwarden starts. Until then, use the currently listening address shown above.</p>
+                <code>{{ hostNetwork()?.configured?.localUrl }}</code>
+                @if (hostNetwork()?.configured?.lanUrl) {
+                  <code>{{ hostNetwork()?.configured?.lanUrl }}</code>
+                }
               </div>
             }
 
@@ -1355,9 +1359,9 @@ export class SettingsPage {
 
   private patchNetworkForm(settings: HostNetworkSettings): void {
     this.networkForm.patchValue({
-      webAccessMode: settings.webAccessMode,
-      port: settings.port,
-      acknowledgeExposure: settings.webAccessMode === 'lan',
+      webAccessMode: settings.configured.webAccessMode,
+      port: settings.configured.port,
+      acknowledgeExposure: settings.configured.webAccessMode === 'lan',
     });
   }
 
